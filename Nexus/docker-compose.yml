@@ -1,0 +1,21 @@
+services:
+  nexus-web:
+    build: .
+    container_name: nexus-app
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./conf:/app/conf
+      - ./Scripts:/app/Scripts:ro
+    environment:
+      - POWERSHELL_TELEMETRY_OPTOUT=1
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+    restart: unless-stopped
+    networks:
+      - nexus-network
+
+networks:
+  nexus-network:
+    driver: bridge

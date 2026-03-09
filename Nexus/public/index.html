@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus - Automation Sequencer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Side Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <h2>Nexus</h2>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="#" class="nav-link active" data-panel="workflows">
+                    <span>Workflows</span>
+                </a></li>
+                <li><a href="#" class="nav-link" data-panel="scripts">
+                    <span>Scripts</span>
+                </a></li>
+                <li><a href="#" class="nav-link" data-panel="webhooks">
+                    <span>Webhooks</span>
+                </a></li>
+                <li><a href="#" class="nav-link" data-panel="runner">
+                    <span>Run / Schedule</span>
+                </a></li>
+                <li><a href="#" class="nav-link" data-panel="logs">
+                    <span>Logs</span>
+                </a></li>
+                <li><a href="#" class="nav-link" data-panel="config">
+                    <span>Configuration</span>
+                </a></li>
+            </ul>
+            <div class="sidebar-footer">
+                <p>Version 1.0</p>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+
+            <!-- ===== WORKFLOWS PANEL ===== -->
+            <div id="workflows-panel" class="panel active">
+                <div class="panel-header">
+                    <h1>Workflows</h1>
+                    <p>Build and manage automation workflow ladders</p>
+                </div>
+                <div class="panel-body">
+                    <div id="workflow-message" class="message"></div>
+
+                    <div class="section-header">
+                        <h3>Saved Workflows</h3>
+                        <button type="button" id="new-workflow-btn" class="btn btn-primary btn-sm">+ New Workflow</button>
+                    </div>
+
+                    <div id="workflow-list"></div>
+                    <div id="workflow-list-empty" class="empty-state" style="display: none;">
+                        <p>No workflows yet. Click "+ New Workflow" to get started.</p>
+                    </div>
+
+                    <!-- Workflow Editor (hidden until create/edit) -->
+                    <div id="workflow-editor" style="display: none; margin-top: 24px;">
+                        <div style="border-top: 2px solid #e2e8f0; padding-top: 24px;">
+                            <div class="form-group">
+                                <label>Workflow Name</label>
+                                <input type="text" id="workflow-name" placeholder="e.g. Process Cost Data">
+                            </div>
+
+                            <div class="section-header" style="margin-top: 20px;">
+                                <h3>Steps</h3>
+                                <button type="button" id="add-step-btn" class="btn btn-secondary btn-sm">+ Add Step</button>
+                            </div>
+
+                            <div id="workflow-ladder" class="workflow-ladder"></div>
+
+                            <div id="ladder-empty" class="empty-state" style="margin-top: 12px;">
+                                <p>No steps added. Click "+ Add Step" to build your workflow ladder.</p>
+                            </div>
+
+                            <div class="form-actions" style="margin-top: 20px;">
+                                <button type="button" id="save-workflow-btn" class="btn btn-primary">Save Workflow</button>
+                                <button type="button" id="cancel-workflow-btn" class="btn btn-secondary">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== SCRIPTS PANEL ===== -->
+            <div id="scripts-panel" class="panel">
+                <div class="panel-header">
+                    <h1>Scripts</h1>
+                    <p>Upload and manage scripts stored in your configured storage account</p>
+                </div>
+                <div class="panel-body">
+                    <div id="scripts-message" class="message"></div>
+
+                    <!-- Script type tabs -->
+                    <div style="display: flex; gap: 8px; margin-bottom: 20px;">
+                        <button type="button" class="btn btn-primary btn-sm script-tab active" data-type="powershell">PowerShell</button>
+                        <button type="button" class="btn btn-secondary btn-sm script-tab" data-type="terraform">Terraform</button>
+                        <button type="button" class="btn btn-secondary btn-sm script-tab" data-type="python">Python</button>
+                        <button type="button" class="btn btn-secondary btn-sm script-tab" data-type="shell">Shell</button>
+                    </div>
+
+                    <!-- Upload area -->
+                    <div class="upload-area" id="upload-area">
+                        <p>Click or drag a file here to upload to <strong id="upload-type-label">PowerShell</strong> container</p>
+                        <input type="file" id="script-file-input">
+                    </div>
+
+                    <!-- Script list -->
+                    <div id="script-list"></div>
+                    <div id="script-list-empty" class="empty-state" style="display: none;">
+                        <p>No scripts uploaded yet.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== WEBHOOKS PANEL ===== -->
+            <div id="webhooks-panel" class="panel">
+                <div class="panel-header">
+                    <h1>Webhooks</h1>
+                    <p>Manage webhook configurations for use in workflow steps</p>
+                </div>
+                <div class="panel-body">
+                    <div id="webhooks-message" class="message"></div>
+
+                    <div class="section-header">
+                        <h3>Saved Webhooks</h3>
+                        <button type="button" id="add-webhook-btn" class="btn btn-primary btn-sm">+ Add Webhook</button>
+                    </div>
+
+                    <div id="webhook-list"></div>
+                    <div id="webhook-list-empty" class="empty-state" style="display: none;">
+                        <p>No webhooks configured yet.</p>
+                    </div>
+
+                    <!-- Add / Edit Webhook Form (hidden) -->
+                    <div id="webhook-form" style="display: none; margin-top: 24px; border-top: 2px solid #e2e8f0; padding-top: 24px;">
+                        <h3 style="margin-bottom: 16px; font-size: 15px; color: var(--text-primary);">Webhook Configuration</h3>
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" id="webhook-name" placeholder="e.g. trigger-pipeline-adf">
+                        </div>
+                        <div class="form-group">
+                            <label>URI</label>
+                            <input type="text" id="webhook-uri" placeholder="https://...">
+                        </div>
+                        <div class="form-group">
+                            <label>Auth Type</label>
+                            <select id="webhook-auth-type">
+                                <option value="none">None (Direct POST)</option>
+                                <option value="oauth">OAuth Client Credentials (e.g. Data Factory)</option>
+                            </select>
+                        </div>
+                        <div id="webhook-oauth-fields" style="display: none;">
+                            <div class="form-group">
+                                <label>Tenant ID</label>
+                                <input type="text" id="webhook-tenant-id">
+                            </div>
+                            <div class="form-group">
+                                <label>Client ID</label>
+                                <input type="text" id="webhook-client-id">
+                            </div>
+                            <div class="form-group">
+                                <label>Client Secret</label>
+                                <input type="password" id="webhook-client-secret">
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="save-webhook-btn" class="btn btn-primary">Save Webhook</button>
+                            <button type="button" id="cancel-webhook-btn" class="btn btn-secondary">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== RUN / SCHEDULE PANEL ===== -->
+            <div id="runner-panel" class="panel">
+                <div class="panel-header">
+                    <h1>Run / Schedule</h1>
+                    <p>Execute workflows manually or set up schedules</p>
+                </div>
+                <div class="panel-body">
+                    <div id="runner-message" class="message"></div>
+
+                    <!-- Manual Run -->
+                    <h3 style="margin-bottom: 16px; font-size: 15px; color: var(--text-primary);">Manual Run</h3>
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 32px;">
+                        <select id="run-workflow-select" style="flex: 1;">
+                            <option value="">-- Select a workflow --</option>
+                        </select>
+                        <button type="button" id="run-workflow-btn" class="btn btn-primary">Run Now</button>
+                    </div>
+
+                    <!-- Schedules -->
+                    <div style="border-top: 2px solid #e2e8f0; padding-top: 24px;">
+                        <div class="section-header">
+                            <h3>Schedules</h3>
+                            <button type="button" id="add-schedule-btn" class="btn btn-primary btn-sm">+ Add Schedule</button>
+                        </div>
+
+                        <div id="schedule-list"></div>
+                        <div id="schedule-list-empty" class="empty-state" style="display: none;">
+                            <p>No schedules configured.</p>
+                        </div>
+
+                        <!-- Add Schedule Form (hidden) -->
+                        <div id="schedule-form" style="display: none; margin-top: 24px; border-top: 2px solid #e2e8f0; padding-top: 24px;">
+                            <h3 style="margin-bottom: 16px; font-size: 15px; color: var(--text-primary);">New Schedule</h3>
+                            <div class="form-group">
+                                <label>Workflow</label>
+                                <select id="schedule-workflow-select">
+                                    <option value="">-- Select a workflow --</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Interval</label>
+                                <select id="schedule-interval">
+                                    <option value="hourly">Hourly</option>
+                                    <option value="daily" selected>Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="monthly">Monthly</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>First Run</label>
+                                <input type="datetime-local" id="schedule-first-run">
+                            </div>
+                            <div class="form-actions">
+                                <button type="button" id="save-schedule-btn" class="btn btn-primary">Save Schedule</button>
+                                <button type="button" id="cancel-schedule-btn" class="btn btn-secondary">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== LOGS PANEL ===== -->
+            <div id="logs-panel" class="panel">
+                <div class="panel-header">
+                    <h1>Logs</h1>
+                    <p>Review execution logs for workflow runs</p>
+                </div>
+                <div class="panel-body">
+                    <div id="logs-message" class="message"></div>
+
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 20px;">
+                        <select id="logs-workflow-select" style="flex: 1;">
+                            <option value="">-- Select a workflow --</option>
+                        </select>
+                        <button type="button" id="load-logs-btn" class="btn btn-secondary">Load Logs</button>
+                    </div>
+
+                    <div id="logs-list"></div>
+                    <div id="logs-empty" class="empty-state" style="display: none;">
+                        <p>Select a workflow and click "Load Logs" to view run history.</p>
+                    </div>
+
+                    <!-- Log detail modal rendered in JS -->
+                </div>
+            </div>
+
+            <!-- ===== CONFIGURATION PANEL ===== -->
+            <div id="config-panel" class="panel">
+                <div class="panel-header">
+                    <h1>Configuration</h1>
+                    <p>Configure the storage account used for scripts, workflows, and logs</p>
+                </div>
+                <div class="panel-body">
+                    <div id="config-message" class="message"></div>
+                    <form id="config-form">
+                        <div class="form-group">
+                            <label>Storage Account Name</label>
+                            <input type="text" id="config-storage-account" placeholder="e.g. nexusstorage01">
+                        </div>
+                        <div class="form-group">
+                            <label>Access Key</label>
+                            <input type="password" id="config-key" placeholder="Storage account access key">
+                        </div>
+                        <div class="form-group">
+                            <label>Resource Group</label>
+                            <input type="text" id="config-resource-group" placeholder="e.g. rg-nexus">
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">Save Configuration</button>
+                            <button type="button" id="prepare-containers-btn" class="btn btn-secondary">Prepare Containers</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Add Step Modal -->
+    <div id="add-step-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Add Step</h2>
+                <button class="modal-close" id="close-step-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Step Type</label>
+                    <select id="step-type-select">
+                        <option value="">-- Select type --</option>
+                        <option value="powershell">PowerShell</option>
+                        <option value="terraform">Terraform</option>
+                        <option value="python">Python</option>
+                        <option value="shell">Shell</option>
+                        <option value="webhook">Webhook</option>
+                    </select>
+                </div>
+                <div class="form-group" id="step-script-group" style="display: none;">
+                    <label>Script / Resource</label>
+                    <select id="step-script-select">
+                        <option value="">-- Select --</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="button" id="confirm-add-step-btn" class="btn btn-primary">Add</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Detail Modal -->
+    <div id="log-detail-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2 id="log-detail-title">Run Log</h2>
+                <button class="modal-close" id="close-log-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="log-detail-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

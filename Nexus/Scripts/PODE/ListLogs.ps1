@@ -1,0 +1,23 @@
+# List run logs for a workflow from {workflow-container}/logs/
+param(
+    [Parameter(Mandatory)] [string]$Workflow
+)
+
+$containerName = ($Workflow -replace '[^a-z0-9-]', '-').ToLower()
+
+try {
+    $blobs = Get-BlobList -Container $containerName -Prefix 'logs/'
+    $logs = @()
+    foreach ($blob in $blobs) {
+        if ($blob.Name -notmatch '\.json$') { continue }
+        $logs += @{
+            name         = $blob.Name -replace '^logs/', ''
+            lastModified = $blob.LastModified.ToString('yyyy-MM-dd HH:mm:ss')
+        }
+    }
+    # Sort newest first
+    $logs = $logs | Sort-Object { $_.name } -Descending
+    return @{ success = $true; logs = $logs }
+} catch {
+    return @{ success = $false; message = "Error listing logs: $($_.Exception.Message)"; logs = @() }
+}
