@@ -96,6 +96,20 @@ Start-PodeServer -Threads 2 {
         Write-PodeFileResponse -Path './public/index.html' -ContentType 'text/html'
     }
 
+    # Version endpoint
+    Add-PodeRoute -Method Get -Path '/api/version' -ScriptBlock {
+        try {
+            $version = if (Test-Path './version.txt') {
+                Get-Content -Path './version.txt' -Raw | ForEach-Object { $_.Trim() }
+            } else {
+                'dev'
+            }
+            Write-PodeJsonResponse -Value @{ version = $version }
+        } catch {
+            Write-PodeJsonResponse -Value @{ version = 'unknown' }
+        }
+    }
+
     # ===== CONFIGURATION ROUTES =====
     Add-PodeRoute -Method Get -Path '/api/config' -ScriptBlock {
         try {

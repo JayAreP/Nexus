@@ -31,6 +31,7 @@ RUN pwsh -Command "Install-Module -Name Az.Resources -Force -Scope AllUsers -All
 COPY Server.ps1 /app/
 COPY Scripts/ /app/Scripts/
 COPY public/ /app/public/
+COPY version.txt /app/
 
 # Create conf directory for local config
 RUN mkdir -p /app/conf

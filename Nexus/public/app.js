@@ -899,6 +899,17 @@ document.getElementById('close-log-modal').addEventListener('click', () => {
 });
 
 // ===== INIT =====
+async function loadVersion() {
+    try {
+        const r = await fetch('/api/version');
+        const data = await r.json();
+        document.getElementById('version-number').textContent = data.version || 'unknown';
+    } catch (err) {
+        document.getElementById('version-number').textContent = 'error';
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    loadVersion();
     loadWorkflowList();
 });
