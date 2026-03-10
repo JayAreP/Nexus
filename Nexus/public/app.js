@@ -17,6 +17,7 @@ document.querySelectorAll('.nav-link').forEach(link => {
         if (panelId === 'filechecks') loadFileCheckList();
         if (panelId === 'runner') { loadWorkflowDropdowns(); loadScheduleList(); }
         if (panelId === 'logs') loadWorkflowDropdowns();
+        if (panelId === 'modules') { document.getElementById('modules-output').innerHTML = ''; document.getElementById('modules-empty').style.display = 'block'; }
         if (panelId === 'config') loadConfig();
     });
 });
@@ -1091,6 +1092,106 @@ async function previewStep(idx) {
 
 document.getElementById('close-preview-modal').addEventListener('click', () => {
     document.getElementById('preview-modal').style.display = 'none';
+});
+
+// ===== MODULES =====
+let currentModuleType = 'powershell';
+
+document.querySelectorAll('.module-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.module-tab').forEach(t => {
+            t.classList.remove('active');
+            t.classList.remove('btn-primary');
+            t.classList.add('btn-secondary');
+        });
+        tab.classList.add('active');
+        tab.classList.remove('btn-secondary');
+        tab.classList.add('btn-primary');
+        currentModuleType = tab.dataset.type;
+        document.getElementById('modules-output').innerHTML = '';
+        document.getElementById('modules-empty').style.display = 'block';
+        document.getElementById('module-install-form').style.display = 'none';
+        clearMessage('modules-message');
+    });
+});
+
+document.getElementById('show-modules-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('show-modules-btn');
+    const outputEl = document.getElementById('modules-output');
+    const emptyEl = document.getElementById('modules-empty');
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+    outputEl.innerHTML = '';
+    emptyEl.style.display = 'none';
+    clearMessage('modules-message');
+
+    try {
+        const r = await fetch(`/api/modules/${currentModuleType}`);
+        const data = await r.json();
+        if (data.success) {
+            if (currentModuleType === 'powershell' && data.modules && data.modules.length > 0) {
+                let html = '<table style="width: 100%; font-size: 13px; border-collapse: collapse;">';
+                html += '<thead><tr style="border-bottom: 2px solid #e2e8f0; text-align: left;"><th style="padding: 8px 12px;">Name</th><th style="padding: 8px 12px;">Version</th><th style="padding: 8px 12px;">Path</th></tr></thead><tbody>';
+                data.modules.forEach(m => {
+                    html += `<tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 8px 12px; font-weight: 500;">${escHtml(m.name)}</td><td style="padding: 8px 12px;">${escHtml(m.version)}</td><td style="padding: 8px 12px; font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escHtml(m.path)}</td></tr>`;
+                });
+                html += '</tbody></table>';
+                outputEl.innerHTML = html;
+            } else if (currentModuleType === 'python' && data.output) {
+                outputEl.innerHTML = `<pre style="font-size: 12px; background: #1a202c; color: #e2e8f0; padding: 16px; overflow-x: auto; white-space: pre-wrap; max-height: 70vh; overflow-y: auto;">${escHtml(data.output)}</pre>`;
+            } else {
+                emptyEl.style.display = 'block';
+                emptyEl.querySelector('p').textContent = 'No modules found.';
+            }
+        } else {
+            showMessage('modules-message', 'error', data.message || 'Failed to list modules');
+        }
+    } catch (err) {
+        showMessage('modules-message', 'error', 'Error: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Show Modules';
+    }
+});
+
+document.getElementById('add-module-btn').addEventListener('click', () => {
+    document.getElementById('module-install-form').style.display = 'block';
+    document.getElementById('module-name-input').value = '';
+    document.getElementById('module-name-input').focus();
+});
+
+document.getElementById('cancel-module-btn').addEventListener('click', () => {
+    document.getElementById('module-install-form').style.display = 'none';
+});
+
+document.getElementById('install-module-btn').addEventListener('click', async () => {
+    const moduleName = document.getElementById('module-name-input').value.trim();
+    if (!moduleName) {
+        showMessage('modules-message', 'error', 'Module name is required');
+        return;
+    }
+    const btn = document.getElementById('install-module-btn');
+    btn.disabled = true;
+    btn.textContent = 'Installing...';
+    clearMessage('modules-message');
+
+    try {
+        const r = await fetch(`/api/modules/${currentModuleType}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: moduleName })
+        });
+        const data = await r.json();
+        showMessage('modules-message', data.success ? 'success' : 'error', data.message);
+        if (data.success) {
+            document.getElementById('module-install-form').style.display = 'none';
+        }
+    } catch (err) {
+        showMessage('modules-message', 'error', 'Error: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Install';
+    }
 });
 
 // ===== INIT =====

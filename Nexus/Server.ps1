@@ -486,6 +486,63 @@ Start-PodeServer -Threads 2 {
         }
     }
 
+    # ===== MODULE MANAGEMENT ROUTES =====
+
+    # List installed modules
+    Add-PodeRoute -Method Get -Path '/api/modules/:type' -ScriptBlock {
+        $type = $WebEvent.Parameters['type']
+        try {
+            if ($type -eq 'powershell') {
+                $modules = Get-Module -ListAvailable | Select-Object Name, @{N='Version';E={$_.Version.ToString()}}, Path | Sort-Object Name
+                $result = @()
+                foreach ($m in $modules) {
+                    $result += @{ name = $m.Name; version = $m.Version; path = $m.Path }
+                }
+                Write-PodeJsonResponse -Value @{ success = $true; modules = $result }
+            } elseif ($type -eq 'python') {
+                $output = & pip3 list 2>&1 | Out-String
+                Write-PodeJsonResponse -Value @{ success = $true; output = $output }
+            } else {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Unknown module type: $type" } -StatusCode 400
+            }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Install a module
+    Add-PodeRoute -Method Post -Path '/api/modules/:type' -ScriptBlock {
+        $type = $WebEvent.Parameters['type']
+        $body = $WebEvent.Data
+        $moduleName = $body.name
+        if ([string]::IsNullOrWhiteSpace($moduleName)) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Module name is required' } -StatusCode 400
+            return
+        }
+        # Validate module name - only allow alphanumeric, dots, hyphens, underscores
+        if ($moduleName -notmatch '^[a-zA-Z0-9._-]+$') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Invalid module name. Only letters, numbers, dots, hyphens, and underscores are allowed.' } -StatusCode 400
+            return
+        }
+        try {
+            if ($type -eq 'powershell') {
+                $output = Install-Module -Name $moduleName -Scope AllUsers -Force -AllowClobber -ErrorAction Stop 2>&1 | Out-String
+                Write-PodeJsonResponse -Value @{ success = $true; message = "PowerShell module '$moduleName' installed successfully" }
+            } elseif ($type -eq 'python') {
+                $output = & pip3 install $moduleName 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) {
+                    Write-PodeJsonResponse -Value @{ success = $false; message = "pip3 install failed: $output" } -StatusCode 500
+                } else {
+                    Write-PodeJsonResponse -Value @{ success = $true; message = "Python module '$moduleName' installed successfully" }
+                }
+            } else {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Unknown module type: $type" } -StatusCode 400
+            }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = "Install failed: $($_.Exception.Message)" } -StatusCode 500
+        }
+    }
+
     # ===== PODE SCHEDULED TASKS (Timer) =====
     # Check every 60 seconds for due scheduled workflows
     Add-PodeTimer -Name 'ScheduleChecker' -Interval 60 -ScriptBlock {
