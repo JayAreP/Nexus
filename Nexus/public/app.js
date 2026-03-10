@@ -544,6 +544,7 @@ function renderLadder() {
                 <div style="display: flex; gap: 6px;">
                     ${idx > 0 ? `<button class="btn btn-secondary btn-sm" onclick="moveStepUp(${idx})">↑</button>` : ''}
                     ${idx < currentWorkflow.steps.length - 1 ? `<button class="btn btn-secondary btn-sm" onclick="moveStepDown(${idx})">↓</button>` : ''}
+                    <button class="btn btn-secondary btn-sm" onclick="previewStep(${idx})">Preview</button>
                     <button class="btn btn-danger btn-sm" onclick="removeStep(${idx})">Remove</button>
                 </div>
             </div>
@@ -1014,6 +1015,82 @@ async function viewLogDetail(workflow, logName) {
 
 document.getElementById('close-log-modal').addEventListener('click', () => {
     document.getElementById('log-detail-modal').style.display = 'none';
+});
+
+// ===== SCRIPT PREVIEW =====
+async function previewStep(idx) {
+    const step = currentWorkflow.steps[idx];
+    if (!step) return;
+
+    const modal = document.getElementById('preview-modal');
+    const titleEl = document.getElementById('preview-modal-title');
+    const contentEl = document.getElementById('preview-modal-content');
+    contentEl.innerHTML = '<p style="color: var(--text-secondary);">Loading...</p>';
+
+    if (step.type === 'webhook') {
+        titleEl.textContent = `Webhook: ${step.webhook || '(none)'}`;
+        if (!step.webhook) {
+            contentEl.innerHTML = '<p>No webhook selected.</p>';
+            modal.style.display = 'flex';
+            return;
+        }
+        try {
+            const r = await fetch(`/api/webhooks/${encodeURIComponent(step.webhook)}`);
+            const data = await r.json();
+            if (data.success) {
+                contentEl.innerHTML = `<pre style="font-size: 12px; background: #1a202c; color: #e2e8f0; padding: 16px; overflow-x: auto; white-space: pre-wrap; max-height: 70vh; overflow-y: auto;">${escHtml(JSON.stringify(data.webhook, null, 2))}</pre>`;
+            } else {
+                contentEl.innerHTML = `<p style="color: var(--error-color);">${escHtml(data.message)}</p>`;
+            }
+        } catch (err) {
+            contentEl.innerHTML = `<p style="color: var(--error-color);">Error: ${escHtml(err.message)}</p>`;
+        }
+        modal.style.display = 'flex';
+    } else if (step.type === 'filecheck') {
+        titleEl.textContent = `File Check: ${step.filecheck || '(none)'}`;
+        if (!step.filecheck) {
+            contentEl.innerHTML = '<p>No file check selected.</p>';
+            modal.style.display = 'flex';
+            return;
+        }
+        try {
+            const r = await fetch(`/api/filechecks/${encodeURIComponent(step.filecheck)}`);
+            const data = await r.json();
+            if (data.success) {
+                contentEl.innerHTML = `<pre style="font-size: 12px; background: #1a202c; color: #e2e8f0; padding: 16px; overflow-x: auto; white-space: pre-wrap; max-height: 70vh; overflow-y: auto;">${escHtml(JSON.stringify(data.filecheck, null, 2))}</pre>`;
+            } else {
+                contentEl.innerHTML = `<p style="color: var(--error-color);">${escHtml(data.message)}</p>`;
+            }
+        } catch (err) {
+            contentEl.innerHTML = `<p style="color: var(--error-color);">Error: ${escHtml(err.message)}</p>`;
+        }
+        modal.style.display = 'flex';
+    } else {
+        // Script types: powershell, terraform, python, shell
+        const scriptName = step.script || '';
+        titleEl.textContent = scriptName || '(no script selected)';
+        if (!scriptName) {
+            contentEl.innerHTML = '<p>No script selected.</p>';
+            modal.style.display = 'flex';
+            return;
+        }
+        try {
+            const r = await fetch(`/api/scripts/${encodeURIComponent(step.type)}/${encodeURIComponent(scriptName)}/content`);
+            const data = await r.json();
+            if (data.success) {
+                contentEl.innerHTML = `<pre style="font-size: 12px; background: #1a202c; color: #e2e8f0; padding: 16px; overflow-x: auto; white-space: pre-wrap; max-height: 70vh; overflow-y: auto;">${escHtml(data.content)}</pre>`;
+            } else {
+                contentEl.innerHTML = `<p style="color: var(--error-color);">${escHtml(data.message)}</p>`;
+            }
+        } catch (err) {
+            contentEl.innerHTML = `<p style="color: var(--error-color);">Error: ${escHtml(err.message)}</p>`;
+        }
+        modal.style.display = 'flex';
+    }
+}
+
+document.getElementById('close-preview-modal').addEventListener('click', () => {
+    document.getElementById('preview-modal').style.display = 'none';
 });
 
 // ===== INIT =====

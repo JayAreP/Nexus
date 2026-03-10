@@ -214,6 +214,23 @@ Start-PodeServer -Threads 2 {
         }
     }
 
+    # Get script content (preview)
+    Add-PodeRoute -Method Get -Path '/api/scripts/:type/:name/content' -ScriptBlock {
+        $scriptType = $WebEvent.Parameters['type']
+        $scriptName = $WebEvent.Parameters['name']
+        $container = "nexus-$scriptType"
+        try {
+            $content = Read-Blob -Container $container -BlobPath $scriptName
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Script '$scriptName' not found" } -StatusCode 404
+                return
+            }
+            Write-PodeJsonResponse -Value @{ success = $true; content = $content; name = $scriptName }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
     # Delete a script
     Add-PodeRoute -Method Delete -Path '/api/scripts/:type/:name' -ScriptBlock {
         $scriptType = $WebEvent.Parameters['type']
@@ -253,6 +270,22 @@ Start-PodeServer -Threads 2 {
         }
     }
 
+    # Get a single webhook config
+    Add-PodeRoute -Method Get -Path '/api/webhooks/:name' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        try {
+            $content = Read-Blob -Container 'nexus-webhooks' -BlobPath "$name.json"
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Webhook '$name' not found" } -StatusCode 404
+                return
+            }
+            $wh = $content | ConvertFrom-Json
+            Write-PodeJsonResponse -Value @{ success = $true; webhook = $wh }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
     Add-PodeRoute -Method Delete -Path '/api/webhooks/:name' -ScriptBlock {
         $name = $WebEvent.Parameters['name']
         try {
@@ -284,6 +317,22 @@ Start-PodeServer -Threads 2 {
             } else {
                 Write-PodeJsonResponse -Value $result
             }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Get a single file check config
+    Add-PodeRoute -Method Get -Path '/api/filechecks/:name' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        try {
+            $content = Read-Blob -Container 'nexus-config' -BlobPath "filechecks/$name.json"
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "File Check '$name' not found" } -StatusCode 404
+                return
+            }
+            $fc = $content | ConvertFrom-Json
+            Write-PodeJsonResponse -Value @{ success = $true; filecheck = $fc }
         } catch {
             Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
         }
