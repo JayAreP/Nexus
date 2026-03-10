@@ -23,6 +23,9 @@
                 <li><a href="#" class="nav-link" data-panel="webhooks">
                     <span>Webhooks</span>
                 </a></li>
+                <li><a href="#" class="nav-link" data-panel="filechecks">
+                    <span>File Checks</span>
+                </a></li>
                 <li><a href="#" class="nav-link" data-panel="runner">
                     <span>Run / Schedule</span>
                 </a></li>
@@ -178,6 +181,57 @@
                 </div>
             </div>
 
+            <!-- ===== FILE CHECKS PANEL ===== -->
+            <div id="filechecks-panel" class="panel">
+                <div class="panel-header">
+                    <h1>File Checks</h1>
+                    <p>Monitor storage account containers for file updates</p>
+                </div>
+                <div class="panel-body">
+                    <div id="filechecks-message" class="message"></div>
+
+                    <div class="section-header">
+                        <h3>Saved File Checks</h3>
+                        <button type="button" id="add-filecheck-btn" class="btn btn-primary btn-sm">+ Add File Check</button>
+                    </div>
+
+                    <div id="filecheck-list"></div>
+                    <div id="filecheck-list-empty" class="empty-state" style="display: none;">
+                        <p>No file checks configured yet.</p>
+                    </div>
+
+                    <!-- Add / Edit File Check Form (hidden) -->
+                    <div id="filecheck-form" style="display: none; margin-top: 24px; border-top: 2px solid #e2e8f0; padding-top: 24px;">
+                        <h3 style="margin-bottom: 16px; font-size: 15px; color: var(--text-primary);">File Check Configuration</h3>
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" id="filecheck-name" placeholder="e.g. cost-data-storage">
+                        </div>
+                        <div class="form-group">
+                            <label>Storage Account Name</label>
+                            <input type="text" id="filecheck-storage-account" placeholder="e.g. mystorageaccount01">
+                        </div>
+                        <div class="form-group">
+                            <label>Auth Type</label>
+                            <select id="filecheck-auth-type">
+                                <option value="rbac">RBAC (Use App Service Principal)</option>
+                                <option value="sas">SAS Token</option>
+                            </select>
+                        </div>
+                        <div id="filecheck-sas-fields" style="display: none;">
+                            <div class="form-group">
+                                <label>SAS Token</label>
+                                <input type="password" id="filecheck-sas-token" placeholder="?sv=2022-11-02&ss=b&srt=sco...">
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="save-filecheck-btn" class="btn btn-primary">Save File Check</button>
+                            <button type="button" id="cancel-filecheck-btn" class="btn btn-secondary">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- ===== RUN / SCHEDULE PANEL ===== -->
             <div id="runner-panel" class="panel">
                 <div class="panel-header">
@@ -313,6 +367,7 @@
                         <option value="python">Python</option>
                         <option value="shell">Shell</option>
                         <option value="webhook">Webhook</option>
+                        <option value="filecheck">File Check</option>
                     </select>
                 </div>
                 <div class="form-group" id="step-script-group" style="display: none;">

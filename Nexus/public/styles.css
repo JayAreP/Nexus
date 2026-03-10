@@ -492,6 +492,11 @@ select:focus {
     color: #9d174d;
 }
 
+.badge-filecheck {
+    background: #e0e7ff;
+    color: #3730a3;
+}
+
 .step-body {
     padding-left: 38px;
 }

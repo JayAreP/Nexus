@@ -30,7 +30,7 @@ Start-PodeServer -Threads 2 {
 
     # ===== BLOB STORAGE HELPERS =====
     # Container layout on configured storage account:
-    #   nexus-config/        - workflow definitions, schedules, webhook configs
+    #   nexus-config/        - workflow definitions, schedules, webhook configs, file check configs
     #   nexus-powershell/    - uploaded PowerShell scripts
     #   nexus-terraform/     - uploaded Terraform plans
     #   nexus-python/        - uploaded Python scripts
@@ -258,6 +258,42 @@ Start-PodeServer -Threads 2 {
         try {
             Remove-Blob -Container 'nexus-webhooks' -BlobPath "$name.json"
             Write-PodeJsonResponse -Value @{ success = $true; message = "Webhook '$name' deleted" }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # ===== FILE CHECK CONFIG ROUTES =====
+
+    Add-PodeRoute -Method Get -Path '/api/filechecks' -ScriptBlock {
+        try {
+            $result = & './Scripts/PODE/ListFileChecks.ps1'
+            Write-PodeJsonResponse -Value $result
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    Add-PodeRoute -Method Post -Path '/api/filechecks' -ScriptBlock {
+        $body = $WebEvent.Data
+        try {
+            $result = & './Scripts/PODE/SaveFileCheck.ps1' -Name $body.name -StorageAccount $body.storageAccount `
+                -AuthType $body.authType -SasToken $body.sasToken
+            if ($result.statusCode) {
+                Write-PodeJsonResponse -Value $result -StatusCode $result.statusCode
+            } else {
+                Write-PodeJsonResponse -Value $result
+            }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    Add-PodeRoute -Method Delete -Path '/api/filechecks/:name' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        try {
+            Remove-Blob -Container 'nexus-config' -BlobPath "filechecks/$name.json"
+            Write-PodeJsonResponse -Value @{ success = $true; message = "File Check '$name' deleted" }
         } catch {
             Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
         }

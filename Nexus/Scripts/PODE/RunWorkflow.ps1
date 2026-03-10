@@ -43,12 +43,13 @@ $allPassed = $true
 
 for ($i = 0; $i -lt $steps.Count; $i++) {
     $step = $steps[$i]
-    $stepLabel = "Step $($i + 1): [$($step.type)] $($step.script)$($step.webhook)"
+    $stepLabel = "Step $($i + 1): [$($step.type)] $($step.script)$($step.webhook)$($step.filecheck)"
     $stepLog = @{
         index   = $i + 1
         type    = $step.type
         script  = $step.script
         webhook = $step.webhook
+        filecheck = $step.filecheck
         status  = 'running'
         output  = ''
         error   = ''
@@ -248,6 +249,98 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
 
                 $response = Invoke-RestMethod -Method Post -Uri $wh.uri -Headers $headers -Body $bodyJson -ContentType 'application/json'
                 $stdOut = $response | ConvertTo-Json -Depth 10
+                $output = $stdOut
+            }
+
+            'filecheck' {
+                # Load file check configuration
+                $fcContent = Read-Blob -Container 'nexus-config' -BlobPath "filechecks/$($step.filecheck).json"
+                if (-not $fcContent) { throw "File Check '$($step.filecheck)' not found" }
+                $fc = $fcContent | ConvertFrom-Json
+
+                # Get params: container, folderPath, timeout
+                $containerName = $params['container']
+                $folderPath = $params['folderPath']
+                $timeoutMinutes = [int]($params['timeout'])
+                if ([string]::IsNullOrWhiteSpace($containerName)) { throw "File Check requires 'container' parameter" }
+                if ($timeoutMinutes -le 0) { $timeoutMinutes = 5 }
+
+                # Build storage context based on auth type
+                $fcCtx = $null
+                if ($fc.authType -eq 'sas') {
+                    $fcCtx = New-AzStorageContext -StorageAccountName $fc.storageAccount -SasToken $fc.sasToken
+                } else {
+                    # RBAC — use the already-connected service principal
+                    $fcCtx = New-AzStorageContext -StorageAccountName $fc.storageAccount -UseConnectedAccount
+                }
+
+                # Normalize folder path prefix
+                $prefix = if (![string]::IsNullOrWhiteSpace($folderPath)) {
+                    $folderPath.TrimStart('/').TrimEnd('/') + '/'
+                } else { $null }
+
+                # Snapshot the current file state (last-modified times)
+                $baselineBlobs = @{}
+                try {
+                    $existingBlobs = if ($prefix) {
+                        Get-AzStorageBlob -Container $containerName -Prefix $prefix -Context $fcCtx -ErrorAction Stop
+                    } else {
+                        Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
+                    }
+                    foreach ($b in $existingBlobs) {
+                        $baselineBlobs[$b.Name] = $b.LastModified
+                    }
+                } catch {
+                    # Empty container or path — baseline is empty
+                }
+
+                $stepStartCheck = Get-Date
+                $deadline = $stepStartCheck.AddMinutes($timeoutMinutes)
+                $newFiles = @()
+
+                [void]$allOutput.AppendLine("  Polling $($fc.storageAccount)/$containerName/$prefix every 30s (timeout: ${timeoutMinutes}m)...")
+
+                while ((Get-Date) -lt $deadline) {
+                    Start-Sleep -Seconds 30
+
+                    try {
+                        $currentBlobs = if ($prefix) {
+                            Get-AzStorageBlob -Container $containerName -Prefix $prefix -Context $fcCtx -ErrorAction Stop
+                        } else {
+                            Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
+                        }
+                    } catch {
+                        [void]$allOutput.AppendLine("  Poll error: $($_.Exception.Message)")
+                        continue
+                    }
+
+                    $newFiles = @()
+                    foreach ($b in $currentBlobs) {
+                        if (-not $baselineBlobs.ContainsKey($b.Name)) {
+                            # Brand new file
+                            $newFiles += "$containerName/$($b.Name)"
+                        } elseif ($b.LastModified -gt $baselineBlobs[$b.Name]) {
+                            # Updated file
+                            $newFiles += "$containerName/$($b.Name)"
+                        }
+                    }
+
+                    if ($newFiles.Count -gt 0) {
+                        [void]$allOutput.AppendLine("  Detected $($newFiles.Count) new/updated file(s)")
+                        break
+                    }
+
+                    $remaining = [math]::Round(($deadline - (Get-Date)).TotalSeconds)
+                    [void]$allOutput.AppendLine("  No changes yet... ${remaining}s remaining")
+                }
+
+                if ($newFiles.Count -eq 0) {
+                    throw "File Check timed out after ${timeoutMinutes} minute(s) — no new files detected in $($fc.storageAccount)/$containerName/$prefix"
+                }
+
+                # Build output JSON
+                $resultObj = @{ files = $newFiles }
+                $stdOut = $resultObj | ConvertTo-Json -Depth 10
                 $output = $stdOut
             }
         }
