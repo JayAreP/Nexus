@@ -9,7 +9,7 @@ try {
     $blobs = Get-BlobList -Container $containerName -Prefix 'logs/'
     $logs = @()
     foreach ($blob in $blobs) {
-        if ($blob.Name -notmatch '\.json$') { continue }
+        if ($blob.Name -notmatch '\.(json|log)$') { continue }
         $logs += @{
             name         = $blob.Name -replace '^logs/', ''
             lastModified = $blob.LastModified.ToString('yyyy-MM-dd HH:mm:ss')

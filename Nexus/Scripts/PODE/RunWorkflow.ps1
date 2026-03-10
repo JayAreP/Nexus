@@ -5,6 +5,7 @@ param(
 )
 
 $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+$logBaseName = "$Name-$timestamp"
 $logContainerName = ($Name -replace '[^a-z0-9-]', '-').ToLower()
 
 # Ensure log container exists
@@ -32,12 +33,17 @@ $runLog = @{
     steps     = @()
 }
 
+# Collect all stdout and stderr across steps
+$allOutput = [System.Text.StringBuilder]::new()
+$allErrors = [System.Text.StringBuilder]::new()
+
 $capturedOutputs = @{}  # Variable store for output chaining between steps
 
 $allPassed = $true
 
 for ($i = 0; $i -lt $steps.Count; $i++) {
     $step = $steps[$i]
+    $stepLabel = "Step $($i + 1): [$($step.type)] $($step.script)$($step.webhook)"
     $stepLog = @{
         index   = $i + 1
         type    = $step.type
@@ -47,6 +53,10 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
         output  = ''
         error   = ''
     }
+
+    [void]$allOutput.AppendLine("=========================================")
+    [void]$allOutput.AppendLine("  $stepLabel")
+    [void]$allOutput.AppendLine("=========================================")
 
     $stepStartTime = Get-Date
 
@@ -75,41 +85,52 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
         }
 
         $output = $null
+        $stdOut = $null
+        $stdErr = $null
 
         switch ($step.type) {
             'powershell' {
-                # Download script from nexus-powershell container
                 $scriptContent = Read-Blob -Container 'nexus-powershell' -BlobPath $step.script
                 if (-not $scriptContent) { throw "Script '$($step.script)' not found in nexus-powershell" }
 
                 $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-ps-$timestamp-$i.ps1"
                 try {
                     [System.IO.File]::WriteAllText($tempScript, $scriptContent, [System.Text.Encoding]::UTF8)
-                    # Build splatted params
-                    if ($params.Count -gt 0) {
-                        $output = & $tempScript @params 2>&1 | Out-String
+                    # Capture stdout and stderr separately
+                    $rawOutput = if ($params.Count -gt 0) {
+                        & $tempScript @params 2>&1
                     } else {
-                        $output = & $tempScript 2>&1 | Out-String
+                        & $tempScript 2>&1
                     }
+                    # Separate stdout from stderr
+                    $stdOutLines = @()
+                    $stdErrLines = @()
+                    foreach ($line in $rawOutput) {
+                        if ($line -is [System.Management.Automation.ErrorRecord]) {
+                            $stdErrLines += $line.ToString()
+                        } else {
+                            $stdOutLines += $line.ToString()
+                        }
+                    }
+                    $stdOut = $stdOutLines -join "`n"
+                    $stdErr = $stdErrLines -join "`n"
+                    $output = $stdOut
                 } finally {
                     if (Test-Path $tempScript) { Remove-Item $tempScript -Force -ErrorAction SilentlyContinue }
                 }
             }
 
             'terraform' {
-                # Download terraform files from nexus-terraform container
                 $tfDir = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-tf-$timestamp-$i"
                 New-Item -Path $tfDir -ItemType Directory -Force | Out-Null
 
                 try {
-                    # Download the specified plan/file
                     $tfContent = Read-Blob -Container 'nexus-terraform' -BlobPath $step.script
                     if (-not $tfContent) { throw "Terraform file '$($step.script)' not found in nexus-terraform" }
 
                     $tfFile = Join-Path $tfDir $step.script
                     [System.IO.File]::WriteAllText($tfFile, $tfContent, [System.Text.Encoding]::UTF8)
 
-                    # Write KV params as .tfvars
                     if ($params.Count -gt 0) {
                         $tfvarsLines = @()
                         foreach ($key in $params.Keys) {
@@ -121,14 +142,15 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
 
                     Push-Location $tfDir
                     try {
-                        $initOutput = terraform init -no-color 2>&1 | Out-String
-                        $applyOutput = terraform apply -auto-approve -no-color 2>&1 | Out-String
-                        $output = "$initOutput`n$applyOutput"
+                        $rawInit = terraform init -no-color 2>&1
+                        $rawApply = terraform apply -auto-approve -no-color 2>&1
+                        $stdOut = ($rawInit + $rawApply) | Out-String
+                        $output = $stdOut
 
-                        # Capture terraform output as JSON
                         try {
                             $tfOutputJson = terraform output -json 2>&1 | Out-String
                             $output += "`n--- Terraform Outputs ---`n$tfOutputJson"
+                            $stdOut += "`n--- Terraform Outputs ---`n$tfOutputJson"
                         } catch { }
                     } finally {
                         Pop-Location
@@ -146,13 +168,24 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
                 try {
                     [System.IO.File]::WriteAllText($tempScript, $scriptContent, [System.Text.Encoding]::UTF8)
 
-                    # Pass params as command-line args: --key value
                     $argList = @($tempScript)
                     foreach ($key in $params.Keys) {
                         $argList += "--$key"
                         $argList += $params[$key]
                     }
-                    $output = & python3 @argList 2>&1 | Out-String
+                    $rawOutput = & python3 @argList 2>&1
+                    $stdOutLines = @()
+                    $stdErrLines = @()
+                    foreach ($line in $rawOutput) {
+                        if ($line -is [System.Management.Automation.ErrorRecord]) {
+                            $stdErrLines += $line.ToString()
+                        } else {
+                            $stdOutLines += $line.ToString()
+                        }
+                    }
+                    $stdOut = $stdOutLines -join "`n"
+                    $stdErr = $stdErrLines -join "`n"
+                    $output = $stdOut
                 } finally {
                     if (Test-Path $tempScript) { Remove-Item $tempScript -Force -ErrorAction SilentlyContinue }
                 }
@@ -167,13 +200,23 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
                     [System.IO.File]::WriteAllText($tempScript, $scriptContent, [System.Text.Encoding]::UTF8)
                     & chmod +x $tempScript 2>$null
 
-                    # Pass params as environment variables
                     foreach ($key in $params.Keys) {
                         [System.Environment]::SetEnvironmentVariable($key, $params[$key])
                     }
-                    $output = & bash $tempScript 2>&1 | Out-String
+                    $rawOutput = & bash $tempScript 2>&1
+                    $stdOutLines = @()
+                    $stdErrLines = @()
+                    foreach ($line in $rawOutput) {
+                        if ($line -is [System.Management.Automation.ErrorRecord]) {
+                            $stdErrLines += $line.ToString()
+                        } else {
+                            $stdOutLines += $line.ToString()
+                        }
+                    }
+                    $stdOut = $stdOutLines -join "`n"
+                    $stdErr = $stdErrLines -join "`n"
+                    $output = $stdOut
                 } finally {
-                    # Clean up env vars
                     foreach ($key in $params.Keys) {
                         [System.Environment]::SetEnvironmentVariable($key, $null)
                     }
@@ -182,14 +225,12 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
             }
 
             'webhook' {
-                # Load webhook config
                 $whContent = Read-Blob -Container 'nexus-webhooks' -BlobPath "$($step.webhook).json"
                 if (-not $whContent) { throw "Webhook '$($step.webhook)' not found" }
                 $wh = $whContent | ConvertFrom-Json
 
                 $headers = @{ 'Content-Type' = 'application/json' }
 
-                # OAuth if needed
                 if ($wh.authType -eq 'oauth') {
                     $tokenBody = @{
                         grant_type    = 'client_credentials'
@@ -202,33 +243,46 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
                     $headers['Authorization'] = "Bearer $($tokenResp.access_token)"
                 }
 
-                # Pass KV params as JSON body (hashtable)
                 $body = $params
                 $bodyJson = $body | ConvertTo-Json -Depth 10
 
                 $response = Invoke-RestMethod -Method Post -Uri $wh.uri -Headers $headers -Body $bodyJson -ContentType 'application/json'
-                $output = $response | ConvertTo-Json -Depth 10
+                $stdOut = $response | ConvertTo-Json -Depth 10
+                $output = $stdOut
             }
         }
 
-        # Capture outputs for chaining
-        if ($step.outputCapture) {
-            foreach ($oc in @($step.outputCapture)) {
-                if (![string]::IsNullOrWhiteSpace($oc.key) -and ![string]::IsNullOrWhiteSpace($oc.as)) {
-                    try {
-                        # Try to parse output as JSON and extract the key
-                        $parsed = $output | ConvertFrom-Json -ErrorAction Stop
-                        $val = $parsed.$($oc.key)
-                        if ($null -ne $val) {
-                            $varName = "step$($i + 1).$($oc.as)"
-                            $capturedOutputs[$varName] = [string]$val
-                        }
-                    } catch {
-                        # If output isn't JSON, try regex extraction
-                        if ($output -match "$($oc.key)\s*[:=]\s*(.+)") {
-                            $varName = "step$($i + 1).$($oc.as)"
-                            $capturedOutputs[$varName] = $Matches[1].Trim()
-                        }
+        # Append step output to full log
+        if ($stdOut) { [void]$allOutput.AppendLine($stdOut) }
+        if ($stdErr) {
+            [void]$allErrors.AppendLine("=========================================")
+            [void]$allErrors.AppendLine("  $stepLabel")
+            [void]$allErrors.AppendLine("=========================================")
+            [void]$allErrors.AppendLine($stdErr)
+        }
+        [void]$allOutput.AppendLine("")
+
+        # Auto-register ALL JSON properties from output as step{N}.{key}
+        try {
+            $parsed = $output | ConvertFrom-Json -ErrorAction Stop
+            foreach ($prop in $parsed.PSObject.Properties) {
+                $varName = "step$($i + 1).$($prop.Name)"
+                $capturedOutputs[$varName] = [string]$prop.Value
+            }
+        } catch {
+            # Output wasn't valid JSON — no properties registered
+        }
+
+        # Breakpoint checks — validate required properties in output
+        if ($step.breakpointChecks) {
+            foreach ($bp in @($step.breakpointChecks)) {
+                if (![string]::IsNullOrWhiteSpace($bp.key)) {
+                    $actualValue = $capturedOutputs["step$($i + 1).$($bp.key)"]
+                    if ($null -eq $actualValue) {
+                        throw "Breakpoint failed: step $($i + 1) output missing property '$($bp.key)'"
+                    }
+                    if (![string]::IsNullOrWhiteSpace($bp.value) -and $actualValue -ne $bp.value) {
+                        throw "Breakpoint failed: step $($i + 1) property '$($bp.key)' expected '$($bp.value)' but got '$actualValue'"
                     }
                 }
             }
@@ -241,12 +295,22 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
         $stepLog.status = 'failed'
         $stepLog.error = $_.Exception.Message
         $allPassed = $false
+
+        # Log the error
+        [void]$allErrors.AppendLine("=========================================")
+        [void]$allErrors.AppendLine("  $stepLabel — EXCEPTION")
+        [void]$allErrors.AppendLine("=========================================")
+        [void]$allErrors.AppendLine($_.Exception.Message)
+        [void]$allErrors.AppendLine("")
+
+        [void]$allOutput.AppendLine("FAILED: $($_.Exception.Message)")
+        [void]$allOutput.AppendLine("")
     }
 
     $stepLog.duration = [math]::Round(((Get-Date) - $stepStartTime).TotalSeconds, 2)
     $runLog.steps += $stepLog
 
-    # Stop on failure — linear ladder doesn't continue past a failed step
+    # Stop on failure
     if ($stepLog.status -eq 'failed') {
         break
     }
@@ -255,12 +319,32 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
 $runLog.endTime = (Get-Date).ToString('o')
 $runLog.status = if ($allPassed) { 'success' } else { 'failed' }
 
-# Save run log to the per-workflow container
+# Save output log: {workflowname}-{timestamp}.json
 try {
     $logJson = $runLog | ConvertTo-Json -Depth 20
-    Write-Blob -Container $logContainerName -BlobPath "logs/run-$timestamp.json" -Content $logJson
+    Write-Blob -Container $logContainerName -BlobPath "logs/$logBaseName.json" -Content $logJson
 } catch {
     Write-Host "Failed to save run log: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Save full text output log
+try {
+    $outputText = $allOutput.ToString()
+    if (![string]::IsNullOrWhiteSpace($outputText)) {
+        Write-Blob -Container $logContainerName -BlobPath "logs/$logBaseName-output.log" -Content $outputText
+    }
+} catch {
+    Write-Host "Failed to save output log: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# Save error log if any errors occurred
+try {
+    $errorText = $allErrors.ToString()
+    if (![string]::IsNullOrWhiteSpace($errorText)) {
+        Write-Blob -Container $logContainerName -BlobPath "logs/$logBaseName-error.log" -Content $errorText
+    }
+} catch {
+    Write-Host "Failed to save error log: $($_.Exception.Message)" -ForegroundColor Red
 }
 
 $statusMsg = if ($allPassed) { "Workflow '$Name' completed successfully ($($steps.Count) steps)" } else { "Workflow '$Name' failed at step $($runLog.steps.Count)" }

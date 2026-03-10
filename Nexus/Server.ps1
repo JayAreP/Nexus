@@ -182,16 +182,32 @@ Start-PodeServer -Threads 2 {
         $scriptType = $WebEvent.Parameters['type']
         $container = "nexus-$scriptType"
         try {
-            $file = $WebEvent.Files | Select-Object -First 1
+            # Pode stores files as a hashtable keyed by form field name
+            $file = $WebEvent.Files['file']
+            if (-not $file) {
+                # Try grabbing first file from hashtable if key doesn't match
+                $firstKey = $WebEvent.Files.Keys | Select-Object -First 1
+                if ($firstKey) { $file = $WebEvent.Files[$firstKey] }
+            }
             if (-not $file) {
                 Write-PodeJsonResponse -Value @{ success = $false; message = "No file uploaded" } -StatusCode 400
                 return
             }
-            $result = & './Scripts/PODE/UploadScript.ps1' -Container $container -FileName $file.FileName -FilePath $file.Path
-            if ($result.statusCode) {
-                Write-PodeJsonResponse -Value $result -StatusCode $result.statusCode
-            } else {
-                Write-PodeJsonResponse -Value $result
+
+            $fileName = $file.FileName
+            # Save uploaded bytes to a temp file for blob upload
+            $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) $fileName
+            [System.IO.File]::WriteAllBytes($tempPath, $file.Bytes)
+
+            try {
+                $result = & './Scripts/PODE/UploadScript.ps1' -Container $container -FileName $fileName -FilePath $tempPath
+                if ($result.statusCode) {
+                    Write-PodeJsonResponse -Value $result -StatusCode $result.statusCode
+                } else {
+                    Write-PodeJsonResponse -Value $result
+                }
+            } finally {
+                if (Test-Path $tempPath) { Remove-Item $tempPath -Force -ErrorAction SilentlyContinue }
             }
         } catch {
             Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500

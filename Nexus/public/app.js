@@ -415,14 +415,14 @@ function renderLadder() {
             `;
         });
 
-        // Output capture fields
-        let outputHtml = '';
-        (step.outputCapture || []).forEach((oc, oi) => {
-            outputHtml += `
-                <div class="kv-pair" data-oc-index="${oi}">
-                    <input type="text" class="kv-key" placeholder="JSON key to capture" value="${escHtml(oc.key || '')}">
-                    <input type="text" class="kv-value" placeholder="Variable name" value="${escHtml(oc.as || '')}">
-                    <button class="kv-remove" onclick="removeOutput(${idx}, ${oi})">×</button>
+        // Breakpoint check fields
+        let breakpointHtml = '';
+        (step.breakpointChecks || []).forEach((bp, bi) => {
+            breakpointHtml += `
+                <div class="kv-pair" data-bp-index="${bi}">
+                    <input type="text" class="kv-key" placeholder="JSON property name" value="${escHtml(bp.key || '')}">
+                    <input type="text" class="kv-value" placeholder="Expected value" value="${escHtml(bp.value || '')}">
+                    <button class="kv-remove" onclick="removeBreakpoint(${idx}, ${bi})">×</button>
                 </div>
             `;
         });
@@ -465,9 +465,9 @@ function renderLadder() {
                 <button class="add-kv-btn" onclick="addKV(${idx})">+ Add Key/Value</button>
 
                 <div class="output-capture" style="margin-top: 12px;">
-                    <label>Output Capture (from JSON response)</label>
-                    <div class="output-list">${outputHtml}</div>
-                    <button class="add-kv-btn" onclick="addOutput(${idx})">+ Add Output Capture</button>
+                    <label>Breakpoint Checks (halt if value doesn't match)</label>
+                    <div class="breakpoint-list">${breakpointHtml}</div>
+                    <button class="add-kv-btn" onclick="addBreakpoint(${idx})">+ Add Breakpoint Check</button>
                 </div>
             </div>
         `;
@@ -496,13 +496,13 @@ function readLadderState() {
             if (key) currentWorkflow.steps[idx].params.push({ key, value });
         });
 
-        // Read output captures
-        const ocPairs = stepEl.querySelectorAll('.output-list .kv-pair');
-        currentWorkflow.steps[idx].outputCapture = [];
-        ocPairs.forEach(oc => {
-            const key = oc.querySelector('.kv-key').value.trim();
-            const as_ = oc.querySelector('.kv-value').value.trim();
-            if (key) currentWorkflow.steps[idx].outputCapture.push({ key, as: as_ });
+        // Read breakpoint checks
+        const bpPairs = stepEl.querySelectorAll('.breakpoint-list .kv-pair');
+        currentWorkflow.steps[idx].breakpointChecks = [];
+        bpPairs.forEach(bp => {
+            const key = bp.querySelector('.kv-key').value.trim();
+            const value = bp.querySelector('.kv-value').value.trim();
+            if (key) currentWorkflow.steps[idx].breakpointChecks.push({ key, value });
         });
 
         // Read input mappings
@@ -531,16 +531,16 @@ function removeKV(stepIdx, kvIdx) {
     renderLadder();
 }
 
-function addOutput(stepIdx) {
+function addBreakpoint(stepIdx) {
     readLadderState();
-    if (!currentWorkflow.steps[stepIdx].outputCapture) currentWorkflow.steps[stepIdx].outputCapture = [];
-    currentWorkflow.steps[stepIdx].outputCapture.push({ key: '', as: '' });
+    if (!currentWorkflow.steps[stepIdx].breakpointChecks) currentWorkflow.steps[stepIdx].breakpointChecks = [];
+    currentWorkflow.steps[stepIdx].breakpointChecks.push({ key: '', value: '' });
     renderLadder();
 }
 
-function removeOutput(stepIdx, ocIdx) {
+function removeBreakpoint(stepIdx, bpIdx) {
     readLadderState();
-    currentWorkflow.steps[stepIdx].outputCapture.splice(ocIdx, 1);
+    currentWorkflow.steps[stepIdx].breakpointChecks.splice(bpIdx, 1);
     renderLadder();
 }
 
@@ -642,7 +642,7 @@ document.getElementById('confirm-add-step-btn').addEventListener('click', () => 
     const newStep = {
         type: type,
         params: [],
-        outputCapture: [],
+        breakpointChecks: [],
         inputMapping: []
     };
     if (type === 'webhook') {
