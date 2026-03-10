@@ -407,6 +407,133 @@ Start-PodeServer -Threads 2 {
 
     # ===== WORKFLOW EXECUTION ROUTES =====
 
+    # Export a workflow (with optional webhooks/filechecks)
+    Add-PodeRoute -Method Get -Path '/api/workflows/:name/export' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        $includeWebhooks = $WebEvent.Query['webhooks'] -eq 'true'
+        $includeFilechecks = $WebEvent.Query['filechecks'] -eq 'true'
+        try {
+            $wfContent = Read-Blob -Container 'nexus-config' -BlobPath "workflows/$name.json"
+            if (-not $wfContent) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Workflow '$name' not found" } -StatusCode 404
+                return
+            }
+            $workflow = $wfContent | ConvertFrom-Json
+
+            $webhooks = @()
+            $filechecks = @()
+
+            if ($includeWebhooks -or $includeFilechecks) {
+                foreach ($step in $workflow.steps) {
+                    if ($includeWebhooks -and $step.type -eq 'webhook' -and $step.webhook) {
+                        $whContent = Read-Blob -Container 'nexus-webhooks' -BlobPath "$($step.webhook).json"
+                        if ($whContent) {
+                            $wh = $whContent | ConvertFrom-Json
+                            # Avoid duplicates
+                            if (-not ($webhooks | Where-Object { $_.name -eq $wh.name })) {
+                                $webhooks += $wh
+                            }
+                        }
+                    }
+                    if ($includeFilechecks -and $step.type -eq 'filecheck' -and $step.filecheck) {
+                        $fcContent = Read-Blob -Container 'nexus-config' -BlobPath "filechecks/$($step.filecheck).json"
+                        if ($fcContent) {
+                            $fc = $fcContent | ConvertFrom-Json
+                            if (-not ($filechecks | Where-Object { $_.name -eq $fc.name })) {
+                                $filechecks += $fc
+                            }
+                        }
+                    }
+                }
+            }
+
+            $export = @{
+                workflow   = $workflow
+                webhooks   = $webhooks
+                filechecks = $filechecks
+            }
+
+            Write-PodeJsonResponse -Value @{ success = $true; export = $export }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Import a workflow (with optional webhooks/filechecks)
+    Add-PodeRoute -Method Post -Path '/api/workflows/import' -ScriptBlock {
+        $body = $WebEvent.Data
+        $importWebhooks = [bool]$body.importWebhooks
+        $importFilechecks = [bool]$body.importFilechecks
+        $payload = $body.payload
+
+        try {
+            if (-not $payload -or -not $payload.workflow) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = 'Invalid import file: missing workflow data' } -StatusCode 400
+                return
+            }
+
+            $workflow = $payload.workflow
+
+            # Validate that referenced scripts exist
+            $missingScripts = @()
+            foreach ($step in $workflow.steps) {
+                if ($step.type -notin @('webhook', 'filecheck') -and $step.script) {
+                    $container = "nexus-$($step.type)"
+                    $content = Read-Blob -Container $container -BlobPath $step.script
+                    if (-not $content) {
+                        $missingScripts += "$($step.script) ($($step.type))"
+                    }
+                }
+            }
+
+            if ($missingScripts.Count -gt 0) {
+                $list = $missingScripts -join ', '
+                Write-PodeJsonResponse -Value @{
+                    success = $false
+                    message = "The following scripts are missing and must be uploaded first: $list"
+                    missingScripts = $missingScripts
+                } -StatusCode 400
+                return
+            }
+
+            # Import webhooks if requested
+            if ($importWebhooks -and $payload.webhooks) {
+                foreach ($wh in $payload.webhooks) {
+                    if ($wh.name) {
+                        $whJson = $wh | ConvertTo-Json -Depth 10
+                        Write-Blob -Container 'nexus-webhooks' -BlobPath "$($wh.name).json" -Content $whJson
+                    }
+                }
+            }
+
+            # Import filechecks if requested
+            if ($importFilechecks -and $payload.filechecks) {
+                foreach ($fc in $payload.filechecks) {
+                    if ($fc.name) {
+                        $fcJson = $fc | ConvertTo-Json -Depth 10
+                        Write-Blob -Container 'nexus-config' -BlobPath "filechecks/$($fc.name).json" -Content $fcJson
+                    }
+                }
+            }
+
+            # Save workflow
+            $wfJson = $workflow | ConvertTo-Json -Depth 20
+            $result = & './Scripts/PODE/SaveWorkflow.ps1' -WorkflowJson $wfJson
+
+            if ($result.success) {
+                Write-PodeJsonResponse -Value @{ success = $true; message = "Workflow '$($workflow.name)' imported successfully" }
+            } else {
+                if ($result.statusCode) {
+                    Write-PodeJsonResponse -Value $result -StatusCode $result.statusCode
+                } else {
+                    Write-PodeJsonResponse -Value $result
+                }
+            }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = "Import failed: $($_.Exception.Message)" } -StatusCode 500
+        }
+    }
+
     # Run a workflow manually
     Add-PodeRoute -Method Post -Path '/api/workflows/:name/run' -ScriptBlock {
         $name = $WebEvent.Parameters['name']

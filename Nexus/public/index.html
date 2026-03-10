@@ -65,7 +65,10 @@
 
                     <div class="section-header">
                         <h3>Saved Workflows</h3>
-                        <button type="button" id="new-workflow-btn" class="btn btn-primary btn-sm">+ New Workflow</button>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" id="import-workflow-btn" class="btn btn-secondary btn-sm">Import</button>
+                            <button type="button" id="new-workflow-btn" class="btn btn-primary btn-sm">+ New Workflow</button>
+                        </div>
                     </div>
 
                     <div id="workflow-list"></div>
@@ -456,6 +459,59 @@
             </div>
             <div class="modal-body">
                 <div id="preview-modal-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Workflow Modal -->
+    <div id="export-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Export Workflow</h2>
+                <button class="modal-close" id="close-export-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 16px; font-size: 13px; color: var(--text-secondary);">Export <strong id="export-workflow-name"></strong> as JSON.</p>
+                <div style="margin-bottom: 12px;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-bottom: 8px;">
+                        <input type="checkbox" id="export-include-webhooks"> Include Webhooks
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                        <input type="checkbox" id="export-include-filechecks"> Include File Checks
+                    </label>
+                </div>
+                <div id="export-message" class="message"></div>
+                <div class="form-actions">
+                    <button type="button" id="confirm-export-btn" class="btn btn-primary">Export</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Workflow Modal -->
+    <div id="import-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Import Workflow</h2>
+                <button class="modal-close" id="close-import-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Select Workflow JSON File</label>
+                    <input type="file" id="import-file-input" accept=".json" style="font-size: 13px;">
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; margin-bottom: 8px;">
+                        <input type="checkbox" id="import-include-webhooks"> Import Webhooks
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                        <input type="checkbox" id="import-include-filechecks"> Import File Checks
+                    </label>
+                </div>
+                <div id="import-message" class="message"></div>
+                <div class="form-actions">
+                    <button type="button" id="confirm-import-btn" class="btn btn-primary">Import</button>
+                </div>
             </div>
         </div>
     </div>

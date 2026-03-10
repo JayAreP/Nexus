@@ -428,6 +428,7 @@ async function loadWorkflowList() {
                         <span class="step-count">${wf.stepCount || 0} step(s)</span>
                     </div>
                     <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary btn-sm" onclick="openExportModal('${wf.name}')">Export</button>
                         <button class="btn btn-primary btn-sm" onclick="editWorkflow('${wf.name}')">Edit</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteWorkflow('${wf.name}')">Delete</button>
                     </div>
@@ -1130,6 +1131,128 @@ async function previewStep(idx) {
 
 document.getElementById('close-preview-modal').addEventListener('click', () => {
     document.getElementById('preview-modal').style.display = 'none';
+});
+
+// ===== EXPORT / IMPORT WORKFLOWS =====
+let exportWorkflowName = '';
+
+function openExportModal(name) {
+    exportWorkflowName = name;
+    document.getElementById('export-workflow-name').textContent = name;
+    document.getElementById('export-include-webhooks').checked = false;
+    document.getElementById('export-include-filechecks').checked = false;
+    clearMessage('export-message');
+    document.getElementById('export-modal').style.display = 'flex';
+}
+
+document.getElementById('close-export-modal').addEventListener('click', () => {
+    document.getElementById('export-modal').style.display = 'none';
+});
+
+document.getElementById('confirm-export-btn').addEventListener('click', async () => {
+    const includeWebhooks = document.getElementById('export-include-webhooks').checked;
+    const includeFilechecks = document.getElementById('export-include-filechecks').checked;
+    const btn = document.getElementById('confirm-export-btn');
+    btn.disabled = true;
+    btn.textContent = 'Exporting...';
+    clearMessage('export-message');
+
+    try {
+        const params = new URLSearchParams();
+        if (includeWebhooks) params.set('webhooks', 'true');
+        if (includeFilechecks) params.set('filechecks', 'true');
+
+        const r = await fetch(`/api/workflows/${encodeURIComponent(exportWorkflowName)}/export?${params}`);
+        const data = await r.json();
+        if (data.success) {
+            const json = JSON.stringify(data.export, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${exportWorkflowName}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            document.getElementById('export-modal').style.display = 'none';
+        } else {
+            showMessage('export-message', 'error', data.message);
+        }
+    } catch (err) {
+        showMessage('export-message', 'error', 'Error: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Export';
+    }
+});
+
+// Import
+document.getElementById('import-workflow-btn').addEventListener('click', () => {
+    document.getElementById('import-file-input').value = '';
+    document.getElementById('import-include-webhooks').checked = false;
+    document.getElementById('import-include-filechecks').checked = false;
+    clearMessage('import-message');
+    document.getElementById('import-modal').style.display = 'flex';
+});
+
+document.getElementById('close-import-modal').addEventListener('click', () => {
+    document.getElementById('import-modal').style.display = 'none';
+});
+
+document.getElementById('confirm-import-btn').addEventListener('click', async () => {
+    const fileInput = document.getElementById('import-file-input');
+    if (!fileInput.files || fileInput.files.length === 0) {
+        showMessage('import-message', 'error', 'Please select a JSON file');
+        return;
+    }
+
+    const btn = document.getElementById('confirm-import-btn');
+    btn.disabled = true;
+    btn.textContent = 'Importing...';
+    clearMessage('import-message');
+
+    try {
+        const text = await fileInput.files[0].text();
+        let payload;
+        try {
+            payload = JSON.parse(text);
+        } catch (e) {
+            showMessage('import-message', 'error', 'Invalid JSON file');
+            return;
+        }
+
+        if (!payload.workflow) {
+            showMessage('import-message', 'error', 'Invalid export file: missing workflow data');
+            return;
+        }
+
+        const importWebhooks = document.getElementById('import-include-webhooks').checked;
+        const importFilechecks = document.getElementById('import-include-filechecks').checked;
+
+        const r = await fetch('/api/workflows/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                payload,
+                importWebhooks,
+                importFilechecks
+            })
+        });
+        const data = await r.json();
+        if (data.success) {
+            document.getElementById('import-modal').style.display = 'none';
+            showMessage('workflow-message', 'success', data.message);
+            loadWorkflowList();
+        } else {
+            showMessage('import-message', 'error', data.message);
+        }
+    } catch (err) {
+        showMessage('import-message', 'error', 'Error: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Import';
+    }
 });
 
 // ===== MODULES =====
