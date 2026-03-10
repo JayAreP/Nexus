@@ -23,6 +23,21 @@ document.querySelectorAll('.nav-link').forEach(link => {
 });
 
 // ===== HELPERS =====
+const langMap = { powershell: 'powershell', python: 'python', shell: 'bash', terraform: 'hcl', webhook: 'json', filecheck: 'json' };
+
+function renderHighlighted(container, code, type) {
+    const lang = langMap[type] || 'plaintext';
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'font-size: 12px; padding: 16px; overflow-x: auto; white-space: pre-wrap; max-height: 70vh; overflow-y: auto; margin: 0;';
+    const codeEl = document.createElement('code');
+    codeEl.className = `language-${lang}`;
+    codeEl.textContent = code;
+    pre.appendChild(codeEl);
+    container.innerHTML = '';
+    container.appendChild(pre);
+    hljs.highlightElement(codeEl);
+}
+
 function showMessage(elementId, type, text) {
     const el = document.getElementById(elementId);
     el.className = 'message ' + type;
@@ -123,7 +138,10 @@ async function loadScripts() {
                 item.className = 'script-item';
                 item.innerHTML = `
                     <span class="script-item-name">${s.name}</span>
-                    <button class="btn btn-danger btn-sm" onclick="deleteScript('${currentScriptType}', '${s.name}')">Delete</button>
+                    <div style="display: flex; gap: 6px;">
+                        <button class="btn btn-secondary btn-sm" onclick="previewScript('${currentScriptType}', '${s.name}')">Preview</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteScript('${currentScriptType}', '${s.name}')">Delete</button>
+                    </div>
                 `;
                 listEl.appendChild(item);
             });
@@ -144,6 +162,26 @@ async function deleteScript(type, name) {
         loadScripts();
     } catch (err) {
         showMessage('scripts-message', 'error', 'Error: ' + err.message);
+    }
+}
+
+async function previewScript(type, name) {
+    const modal = document.getElementById('preview-modal');
+    const titleEl = document.getElementById('preview-modal-title');
+    const contentEl = document.getElementById('preview-modal-content');
+    titleEl.textContent = name;
+    contentEl.innerHTML = '<p style="color: var(--text-secondary);">Loading...</p>';
+    modal.style.display = 'flex';
+    try {
+        const r = await fetch(`/api/scripts/${encodeURIComponent(type)}/${encodeURIComponent(name)}/content`);
+        const data = await r.json();
+        if (data.success) {
+            renderHighlighted(contentEl, data.content, type);
+        } else {
+            contentEl.innerHTML = `<p style="color: var(--error-color);">${escHtml(data.message)}</p>`;
+        }
+    } catch (err) {
+        contentEl.innerHTML = `<p style="color: var(--error-color);">Error: ${escHtml(err.message)}</p>`;
     }
 }
 
@@ -1039,7 +1077,7 @@ async function previewStep(idx) {
             const r = await fetch(`/api/webhooks/${encodeURIComponent(step.webhook)}`);
             const data = await r.json();
             if (data.success) {
-                contentEl.innerHTML = `<pre style="font-size: 12px; background: #1a202c; color: #e2e8f0; padding: 16px; overflow-x: auto; white-space: pre-wrap; max-height: 70vh; overflow-y: auto;">${escHtml(JSON.stringify(data.webhook, null, 2))}</pre>`;
+                renderHighlighted(contentEl, JSON.stringify(data.webhook, null, 2), 'webhook');
             } else {
                 contentEl.innerHTML = `<p style="color: var(--error-color);">${escHtml(data.message)}</p>`;
             }
@@ -1058,7 +1096,7 @@ async function previewStep(idx) {
             const r = await fetch(`/api/filechecks/${encodeURIComponent(step.filecheck)}`);
             const data = await r.json();
             if (data.success) {
-                contentEl.innerHTML = `<pre style="font-size: 12px; background: #1a202c; color: #e2e8f0; padding: 16px; overflow-x: auto; white-space: pre-wrap; max-height: 70vh; overflow-y: auto;">${escHtml(JSON.stringify(data.filecheck, null, 2))}</pre>`;
+                renderHighlighted(contentEl, JSON.stringify(data.filecheck, null, 2), 'filecheck');
             } else {
                 contentEl.innerHTML = `<p style="color: var(--error-color);">${escHtml(data.message)}</p>`;
             }
@@ -1079,7 +1117,7 @@ async function previewStep(idx) {
             const r = await fetch(`/api/scripts/${encodeURIComponent(step.type)}/${encodeURIComponent(scriptName)}/content`);
             const data = await r.json();
             if (data.success) {
-                contentEl.innerHTML = `<pre style="font-size: 12px; background: #1a202c; color: #e2e8f0; padding: 16px; overflow-x: auto; white-space: pre-wrap; max-height: 70vh; overflow-y: auto;">${escHtml(data.content)}</pre>`;
+                renderHighlighted(contentEl, data.content, step.type);
             } else {
                 contentEl.innerHTML = `<p style="color: var(--error-color);">${escHtml(data.message)}</p>`;
             }

@@ -7,6 +7,8 @@ services:
     volumes:
       - ./conf:/app/conf
       - ./Scripts:/app/Scripts:ro
+      - nexus-ps-modules:/usr/local/share/powershell/Modules
+      - nexus-py-packages:/usr/local/lib/python3.10/dist-packages
     environment:
       - POWERSHELL_TELEMETRY_OPTOUT=1
       - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
@@ -19,3 +21,7 @@ services:
 networks:
   nexus-network:
     driver: bridge
+
+volumes:
+  nexus-ps-modules:
+  nexus-py-packages:
