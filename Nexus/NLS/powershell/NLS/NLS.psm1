@@ -25,36 +25,57 @@ function Set-NLSServer {
 function Get-NLSCredential {
     <#
     .SYNOPSIS
-        Retrieve decrypted credentials from the Nexus credential store.
+        Retrieve credentials from the Nexus credential store.
     .DESCRIPTION
-        Calls the Nexus /api/credentials/<name>/resolve endpoint to fetch
-        a named credential with all secret fields decrypted. Returns a
-        hashtable of the credential values.
+        When a Name is specified, calls /api/credentials/<name>/resolve to fetch
+        a single credential with all secret fields decrypted.
+        When no Name is specified, calls /api/credentials to list all stored credentials (metadata only, no secrets).
     .PARAMETER Name
-        The name of the credential to retrieve.
+        The name of the credential to retrieve. If omitted, lists all credentials.
     .PARAMETER AsObject
-        Return a PSCustomObject instead of a hashtable.
+        Return PSCustomObject(s) instead of hashtable(s).
+    .EXAMPLE
+        Get-NLSCredential
+        # Returns all stored credentials (name, type, description)
     .EXAMPLE
         $creds = Get-NLSCredential -Name 'prod-db-login'
         $creds.username   # 'dbadmin'
         $creds.password   # 'supersecret'
-    .EXAMPLE
-        $sp = Get-NLSCredential -Name 'azure-sp-prod'
-        Connect-AzAccount -ServicePrincipal -TenantId $sp.tenantId `
-            -ApplicationId $sp.clientId `
-            -Credential (New-Object PSCredential $sp.clientId, (ConvertTo-SecureString $sp.clientSecret -AsPlainText -Force))
-    .EXAMPLE
-        $aws = Get-NLSCredential -Name 'aws-production'
-        Set-AWSCredential -AccessKey $aws.accessKeyId -SecretKey $aws.secretAccessKey -StoreAs default
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory, Position = 0)]
+        [Parameter(Position = 0)]
         [string]$Name,
 
         [switch]$AsObject
     )
 
+    # List all credentials when no name given
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        $url = "$($script:NexusBaseUrl)/api/credentials"
+        try {
+            $response = Invoke-RestMethod -Uri $url -Method Get -ErrorAction Stop
+            if ($response.success -and $response.credentials) {
+                if ($AsObject) {
+                    return $response.credentials
+                }
+                $results = @()
+                foreach ($cred in $response.credentials) {
+                    $ht = @{}
+                    foreach ($prop in $cred.PSObject.Properties) {
+                        $ht[$prop.Name] = $prop.Value
+                    }
+                    $results += $ht
+                }
+                return $results
+            }
+            return @()
+        } catch {
+            throw "Failed to list credentials from Nexus: $($_.Exception.Message)"
+        }
+    }
+
+    # Resolve a single credential
     $url = "$($script:NexusBaseUrl)/api/credentials/$([Uri]::EscapeDataString($Name))/resolve"
 
     try {

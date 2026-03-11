@@ -4,6 +4,7 @@ services:
     container_name: nexus-app
     ports:
       - "8082:8080"
+      - "7681:7681"
     volumes:
       - ./conf:/app/conf
       - ./Scripts:/app/Scripts:ro

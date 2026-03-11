@@ -1620,6 +1620,23 @@ document.getElementById('confirm-import-btn').addEventListener('click', async ()
     }
 });
 
+// ===== SANDBOX =====
+document.getElementById('sandbox-open-btn').addEventListener('click', () => {
+    const ttydUrl = `${window.location.protocol}//${window.location.hostname}:7681`;
+    window.open(ttydUrl, '_blank');
+});
+
+document.getElementById('sandbox-reset-btn').addEventListener('click', async () => {
+    if (!confirm('Reset sandbox? This will delete all files in /home/sandbox/workspace.')) return;
+    try {
+        const r = await fetch('/api/sandbox/reset', { method: 'POST' });
+        const data = await r.json();
+        showMessage('sandbox-message', data.success ? 'success' : 'error', data.message);
+    } catch (err) {
+        showMessage('sandbox-message', 'error', 'Error: ' + err.message);
+    }
+});
+
 // ===== MODULES =====
 let currentModuleType = 'powershell';
 

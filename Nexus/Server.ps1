@@ -23,6 +23,26 @@ if ($env:AZURE_CLIENT_ID -and $env:AZURE_CLIENT_SECRET -and $env:AZURE_TENANT_ID
     Write-Host "No Azure credentials provided. Storage operations will use account keys only." -ForegroundColor Yellow
 }
 
+## ===== SANDBOX TERMINAL =====
+# Start ttyd as a background process for the sandbox terminal
+try {
+    $ttydPath = '/usr/local/bin/ttyd'
+    if (Test-Path $ttydPath) {
+        $sandboxProc = Start-Process -FilePath $ttydPath -ArgumentList @(
+            '-W',
+            '-p', '7681',
+            '-t', 'fontSize=14',
+            '-t', 'theme={"background":"#1a202c","foreground":"#e2e8f0"}',
+            'su', '-', 'sandbox'
+        ) -PassThru -NoNewWindow
+        Write-Host "Sandbox terminal started on port 7681 (PID: $($sandboxProc.Id))" -ForegroundColor Green
+    } else {
+        Write-Host "ttyd not found - sandbox terminal disabled" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "Failed to start sandbox terminal: $($_.Exception.Message)" -ForegroundColor Red
+}
+
 Start-PodeServer -Threads 2 {
     Add-PodeEndpoint -Address 0.0.0.0 -Port 8080 -Protocol Http
     Enable-PodeSessionMiddleware -Duration 3600 -Extend
@@ -205,6 +225,28 @@ Start-PodeServer -Threads 2 {
             Write-PodeJsonResponse -Value @{ version = $version; serverTime = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') }
         } catch {
             Write-PodeJsonResponse -Value @{ version = 'unknown'; serverTime = '' }
+        }
+    }
+
+    # ===== SANDBOX ROUTES =====
+    Add-PodeRoute -Method Get -Path '/api/sandbox/status' -ScriptBlock {
+        $ttydRunning = $false
+        try {
+            $proc = Get-Process -Name 'ttyd' -ErrorAction SilentlyContinue
+            $ttydRunning = $null -ne $proc
+        } catch { }
+        Write-PodeJsonResponse -Value @{ success = $true; running = $ttydRunning; port = 7681 }
+    }
+
+    Add-PodeRoute -Method Post -Path '/api/sandbox/reset' -ScriptBlock {
+        try {
+            $workspacePath = '/home/sandbox/workspace'
+            if (Test-Path $workspacePath) {
+                Get-ChildItem -Path $workspacePath -Force | Remove-Item -Recurse -Force
+            }
+            Write-PodeJsonResponse -Value @{ success = $true; message = 'Sandbox workspace has been reset' }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = "Reset failed: $($_.Exception.Message)" }
         }
     }
 

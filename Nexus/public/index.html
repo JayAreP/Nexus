@@ -45,6 +45,9 @@
                 <li><a href="#" class="nav-link" data-panel="modules">
                     <span>Modules</span>
                 </a></li>
+                <li><a href="#" class="nav-link" data-panel="sandbox">
+                    <span>Sandbox</span>
+                </a></li>
                 <li><a href="#" class="nav-link" data-panel="config">
                     <span>Configuration</span>
                 </a></li>
@@ -420,6 +423,22 @@
                     <div id="modules-output"></div>
                     <div id="modules-empty" class="empty-state" style="display: none;">
                         <p>Click "Show Modules" to list installed modules.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== SANDBOX PANEL ===== -->
+            <div id="sandbox-panel" class="panel">
+                <div class="panel-header">
+                    <h1>Sandbox</h1>
+                    <p>Restricted test environment &mdash; run pwsh, python, terraform and more</p>
+                </div>
+                <div class="panel-body">
+                    <div id="sandbox-message" class="message"></div>
+                    <p style="margin-bottom:16px; color:#4a5568;">The sandbox opens a web terminal as the restricted <code>sandbox</code> user. Working directory: <code>/home/sandbox/workspace</code>. Available tools: pwsh, python3, terraform, bash, and installed modules (including NLS).</p>
+                    <div class="form-actions">
+                        <button class="btn btn-primary" id="sandbox-open-btn">Open Sandbox Terminal</button>
+                        <button class="btn btn-secondary" id="sandbox-reset-btn">Reset Sandbox</button>
                     </div>
                 </div>
             </div>

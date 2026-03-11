@@ -29,6 +29,8 @@ Steps can capture JSON output and pass it to later steps via input mappings.
 | **Credentials** | Store and manage encrypted credentials (passwords, service principals, API keys, AWS/GCP keys) |
 | **Run / Schedule** | Run workflows manually or create recurring schedules (hourly/daily/weekly/monthly) |
 | **Logs** | View per-workflow run logs with step-by-step output and status |
+| **Modules** | Browse and manage installed PowerShell and Python modules |
+| **Sandbox** | Restricted web terminal for testing scripts — runs as unprivileged `sandbox` user |
 | **Configuration** | Set storage account credentials and prepare containers |
 
 ## Storage layout
@@ -109,6 +111,19 @@ creds["password"]
 ```
 GET http://localhost:8080/api/credentials/{name}/resolve
 ```
+
+## Sandbox
+
+The Sandbox panel provides a web-based terminal running as a restricted `sandbox` user inside the container. Use it to interactively test scripts, import modules, and run ad-hoc commands without affecting the main application.
+
+**Available tools:** `pwsh`, `python3`, `terraform`, `bash`, plus any modules/packages installed in the container.
+
+**Security:**
+- Runs as unprivileged user `sandbox` (no root, no sudo)
+- Working directory: `/home/sandbox/workspace`
+- Served by [ttyd](https://github.com/tsl0922/ttyd) on port **7681**
+
+The terminal is embedded in the Nexus UI. You can also open it directly at `http://<host>:7681` or click **Open in New Tab**.
 
 ## Interactive container access
 
