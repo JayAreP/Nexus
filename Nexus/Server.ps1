@@ -895,6 +895,70 @@ Start-PodeServer -Threads 2 {
         }
     }
 
+    # Install a PowerShell module from GitHub
+    Add-PodeRoute -Method Post -Path '/api/modules/github' -ScriptBlock {
+        $body = $WebEvent.Data
+        $gitUrl = $body.url
+        if ([string]::IsNullOrWhiteSpace($gitUrl)) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'GitHub URL is required' } -StatusCode 400
+            return
+        }
+        # Validate URL is a GitHub repo
+        if ($gitUrl -notmatch '^https://github\.com/[\w.-]+/[\w.-]+(/?)$') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'URL must be a GitHub repository (https://github.com/owner/repo)' } -StatusCode 400
+            return
+        }
+        $gitUrl = $gitUrl.TrimEnd('/')
+        if (-not $gitUrl.EndsWith('.git')) { $gitUrl += '.git' }
+
+        $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-gh-$(Get-Random)"
+        try {
+            # Clone the repo
+            $cloneOutput = & git clone --depth 1 $gitUrl $tempDir 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                throw "git clone failed: $cloneOutput"
+            }
+
+            # Find the .psd1 manifest
+            $psd1Files = Get-ChildItem -Path $tempDir -Filter '*.psd1' -Recurse | Where-Object { $_.Name -ne 'PSScriptAnalyzerSettings.psd1' }
+            if ($psd1Files.Count -eq 0) {
+                throw 'No PowerShell module manifest (.psd1) found in repository'
+            }
+
+            $psd1File = $psd1Files | Select-Object -First 1
+            $manifest = Import-PowerShellDataFile -Path $psd1File.FullName
+            $moduleName = [System.IO.Path]::GetFileNameWithoutExtension($psd1File.Name)
+            $moduleVersion = if ($manifest.ModuleVersion) { $manifest.ModuleVersion } else { '1.0.0' }
+
+            # Determine source directory (the folder containing the .psd1)
+            $sourceDir = $psd1File.DirectoryName
+
+            # Install to system-wide PS modules path
+            $targetDir = "/usr/local/share/powershell/Modules/$moduleName/$moduleVersion"
+            if (Test-Path $targetDir) {
+                Remove-Item -Path $targetDir -Recurse -Force
+            }
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+
+            # Copy module files (from the manifest's directory)
+            Get-ChildItem -Path $sourceDir -Recurse | ForEach-Object {
+                $relativePath = $_.FullName.Substring($sourceDir.Length).TrimStart([IO.Path]::DirectorySeparatorChar)
+                $destPath = Join-Path $targetDir $relativePath
+                if ($_.PSIsContainer) {
+                    New-Item -ItemType Directory -Path $destPath -Force | Out-Null
+                } else {
+                    Copy-Item -Path $_.FullName -Destination $destPath -Force
+                }
+            }
+
+            Write-PodeJsonResponse -Value @{ success = $true; message = "Module '$moduleName' v$moduleVersion installed from GitHub" }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = "GitHub install failed: $($_.Exception.Message)" } -StatusCode 500
+        } finally {
+            if (Test-Path $tempDir) { Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
     # ===== PODE SCHEDULED TASKS (Timer) =====
     # Check every 60 seconds for due scheduled workflows
     Add-PodeTimer -Name 'ScheduleChecker' -Interval 60 -ScriptBlock {

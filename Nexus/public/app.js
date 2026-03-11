@@ -1698,8 +1698,20 @@ document.getElementById('show-modules-btn').addEventListener('click', async () =
 });
 
 document.getElementById('add-module-btn').addEventListener('click', () => {
-    document.getElementById('module-install-form').style.display = 'block';
+    const form = document.getElementById('module-install-form');
+    form.style.display = 'block';
     document.getElementById('module-name-input').value = '';
+    document.getElementById('module-github-input').value = '';
+    // Show/hide GitHub section based on module type
+    const ghSection = document.getElementById('github-install-section');
+    const galleryLabel = document.getElementById('module-gallery-label');
+    if (currentModuleType === 'powershell') {
+        ghSection.style.display = 'block';
+        galleryLabel.textContent = 'PowerShell Gallery';
+    } else {
+        ghSection.style.display = 'none';
+        galleryLabel.textContent = 'PyPI (pip)';
+    }
     document.getElementById('module-name-input').focus();
 });
 
@@ -1707,6 +1719,7 @@ document.getElementById('cancel-module-btn').addEventListener('click', () => {
     document.getElementById('module-install-form').style.display = 'none';
 });
 
+// Install from Gallery / PyPI
 document.getElementById('install-module-btn').addEventListener('click', async () => {
     const moduleName = document.getElementById('module-name-input').value.trim();
     if (!moduleName) {
@@ -1723,6 +1736,37 @@ document.getElementById('install-module-btn').addEventListener('click', async ()
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: moduleName })
+        });
+        const data = await r.json();
+        showMessage('modules-message', data.success ? 'success' : 'error', data.message);
+        if (data.success) {
+            document.getElementById('module-install-form').style.display = 'none';
+        }
+    } catch (err) {
+        showMessage('modules-message', 'error', 'Error: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Install';
+    }
+});
+
+// Install from GitHub
+document.getElementById('install-github-btn').addEventListener('click', async () => {
+    const ghUrl = document.getElementById('module-github-input').value.trim();
+    if (!ghUrl) {
+        showMessage('modules-message', 'error', 'GitHub URL is required');
+        return;
+    }
+    const btn = document.getElementById('install-github-btn');
+    btn.disabled = true;
+    btn.textContent = 'Installing...';
+    clearMessage('modules-message');
+
+    try {
+        const r = await fetch('/api/modules/github', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: ghUrl })
         });
         const data = await r.json();
         showMessage('modules-message', data.success ? 'success' : 'error', data.message);

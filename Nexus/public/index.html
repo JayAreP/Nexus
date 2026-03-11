@@ -409,12 +409,27 @@
 
                     <!-- Add module form (hidden) -->
                     <div id="module-install-form" style="display: none; margin-bottom: 20px; border: 1px solid #e2e8f0; padding: 16px; background: var(--card-bg);">
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label>Module Name</label>
-                            <input type="text" id="module-name-input" placeholder="e.g. Az.Storage or requests">
+                        <!-- Gallery install -->
+                        <div style="margin-bottom: 16px;">
+                            <div class="form-group" style="margin-bottom: 8px;">
+                                <label id="module-gallery-label">PowerShell Gallery</label>
+                                <div style="display: flex; gap: 8px; align-items: flex-start;">
+                                    <input type="text" id="module-name-input" placeholder="e.g. Az.Storage or requests" style="flex:1;">
+                                    <button type="button" id="install-module-btn" class="btn btn-primary" style="white-space:nowrap;">Install</button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- GitHub install (PowerShell only) -->
+                        <div id="github-install-section" style="margin-bottom: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+                            <div class="form-group" style="margin-bottom: 8px;">
+                                <label>GitHub URL</label>
+                                <div style="display: flex; gap: 8px; align-items: flex-start;">
+                                    <input type="text" id="module-github-input" placeholder="e.g. https://github.com/JayAreP/flex" style="flex:1;">
+                                    <button type="button" id="install-github-btn" class="btn btn-primary" style="white-space:nowrap;">Install</button>
+                                </div>
+                            </div>
                         </div>
                         <div class="form-actions" style="margin-top: 0;">
-                            <button type="button" id="install-module-btn" class="btn btn-primary">Install</button>
                             <button type="button" id="cancel-module-btn" class="btn btn-secondary">Cancel</button>
                         </div>
                     </div>

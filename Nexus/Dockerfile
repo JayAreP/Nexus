@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     unzip \
     curl \
+    git \
     gnupg \
     software-properties-common \
     && rm -rf /var/lib/apt/lists/*
