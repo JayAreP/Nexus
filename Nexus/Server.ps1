@@ -3,6 +3,7 @@
 Import-Module Pode -Force -ErrorAction Stop
 Import-Module Az.Storage -Force -ErrorAction SilentlyContinue
 Import-Module Az.Accounts -Force -ErrorAction SilentlyContinue
+Import-Module NLS -Force -ErrorAction SilentlyContinue
 
 Write-Host "Modules loaded successfully" -ForegroundColor Green
 

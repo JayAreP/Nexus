@@ -34,9 +34,9 @@ COPY public/ /app/public/
 COPY version.txt /app/
 
 # Install NLS modules for workflow scripts
-COPY NLS/powershell/NLS/ /usr/local/share/powershell/Modules/NLS/
+COPY NLS/powershell/NLS/ /root/.local/share/powershell/Modules/NLS/1.0.0/
 COPY NLS/python/ /tmp/nls-pkg/
-RUN pip3 install /tmp/nls-pkg/ && rm -rf /tmp/nls-pkg/
+RUN pip3 install --target /usr/lib/python3/dist-packages /tmp/nls-pkg/ && rm -rf /tmp/nls-pkg/
 
 # Create conf directory for local config
 RUN mkdir -p /app/conf
