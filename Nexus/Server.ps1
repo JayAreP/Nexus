@@ -549,6 +549,18 @@ Start-PodeServer -Threads 2 {
         }
     }
 
+    # Live console output (polls temp file written by RunWorkflow)
+    Add-PodeRoute -Method Get -Path '/api/workflows/:name/console' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-console-$($name.ToLower()).log"
+        if (Test-Path $tempFile) {
+            $content = [System.IO.File]::ReadAllText($tempFile, [System.Text.Encoding]::UTF8)
+            Write-PodeJsonResponse -Value @{ running = $true; output = $content }
+        } else {
+            Write-PodeJsonResponse -Value @{ running = $false; output = '' }
+        }
+    }
+
     # ===== SCHEDULE ROUTES =====
 
     Add-PodeRoute -Method Get -Path '/api/schedules' -ScriptBlock {

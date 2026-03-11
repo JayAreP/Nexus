@@ -789,3 +789,78 @@ select:focus {
     font-size: 15px;
     font-weight: 600;
 }
+
+/* Live Console — slide-up panel */
+.live-console-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 999;
+}
+
+.live-console-backdrop.active {
+    display: block;
+}
+
+.live-console-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 50vh;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    background: #1e1e1e;
+    border-top: 2px solid #3b82f6;
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.5);
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+}
+
+.live-console-panel.open {
+    transform: translateY(0);
+}
+
+.live-console-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #161616;
+    color: #d4d4d4;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+    border-bottom: 1px solid #333;
+}
+
+.live-console-header button {
+    background: none;
+    border: none;
+    color: #999;
+    font-size: 22px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.live-console-header button:hover {
+    color: #fff;
+}
+
+#live-console-output {
+    flex: 1;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 14px 16px;
+    margin: 0;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}

@@ -37,6 +37,10 @@ $runLog = @{
 $allOutput = [System.Text.StringBuilder]::new()
 $allErrors = [System.Text.StringBuilder]::new()
 
+# Live console temp file — frontend polls this for real-time output
+$consoleTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-console-$($Name.ToLower()).log"
+[System.IO.File]::WriteAllText($consoleTempFile, "", [System.Text.Encoding]::UTF8)
+
 $capturedOutputs = @{}  # Variable store for output chaining between steps
 
 $allPassed = $true
@@ -58,6 +62,9 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
     [void]$allOutput.AppendLine("=========================================")
     [void]$allOutput.AppendLine("  $stepLabel")
     [void]$allOutput.AppendLine("=========================================")
+
+    # Update live console so user sees step header immediately
+    try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
     $stepStartTime = Get-Date
 
@@ -299,6 +306,7 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
                 $newFiles = @()
 
                 [void]$allOutput.AppendLine("  Polling $($fc.storageAccount)/$containerName/$prefix every 30s (timeout: ${timeoutMinutes}m)...")
+                try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
                 while ((Get-Date) -lt $deadline) {
                     Start-Sleep -Seconds 30
@@ -311,6 +319,7 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
                         }
                     } catch {
                         [void]$allOutput.AppendLine("  Poll error: $($_.Exception.Message)")
+                        try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
                         continue
                     }
 
@@ -332,6 +341,7 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
 
                     $remaining = [math]::Round(($deadline - (Get-Date)).TotalSeconds)
                     [void]$allOutput.AppendLine("  No changes yet... ${remaining}s remaining")
+                    try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
                 }
 
                 if ($newFiles.Count -eq 0) {
@@ -354,6 +364,9 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
             [void]$allErrors.AppendLine($stdErr)
         }
         [void]$allOutput.AppendLine("")
+
+        # Update live console temp file
+        try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
         # Auto-register ALL JSON properties from output as step{N}.{key}
         try {
@@ -398,6 +411,9 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
 
         [void]$allOutput.AppendLine("FAILED: $($_.Exception.Message)")
         [void]$allOutput.AppendLine("")
+
+        # Update live console temp file on failure too
+        try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
     }
 
     $stepLog.duration = [math]::Round(((Get-Date) - $stepStartTime).TotalSeconds, 2)
@@ -439,6 +455,9 @@ try {
 } catch {
     Write-Host "Failed to save error log: $($_.Exception.Message)" -ForegroundColor Red
 }
+
+# Final update to live console temp file before it's done
+try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
 $statusMsg = if ($allPassed) { "Workflow '$Name' completed successfully ($($steps.Count) steps)" } else { "Workflow '$Name' failed at step $($runLog.steps.Count)" }
 return @{

@@ -849,9 +849,34 @@ document.getElementById('run-workflow-btn').addEventListener('click', async () =
         return;
     }
     const btn = document.getElementById('run-workflow-btn');
+    const consoleEl = document.getElementById('live-console');
+    const consoleOut = document.getElementById('live-console-output');
+
     btn.disabled = true;
     btn.textContent = 'Running...';
     showMessage('runner-message', 'info', `Starting workflow "${name}"...`);
+
+    // Show console and start polling
+    consoleOut.textContent = 'Waiting for output...\n';
+    document.getElementById('live-console-title').textContent = `Console — ${name}`;
+    consoleEl.classList.add('open');
+    document.getElementById('live-console-backdrop').classList.add('active');
+
+    let polling = true;
+    const pollConsole = async () => {
+        while (polling) {
+            try {
+                const cr = await fetch(`/api/workflows/${encodeURIComponent(name)}/console`);
+                const cd = await cr.json();
+                if (cd.output) {
+                    consoleOut.textContent = cd.output;
+                    consoleOut.scrollTop = consoleOut.scrollHeight;
+                }
+            } catch (_) { }
+            await new Promise(r => setTimeout(r, 2000));
+        }
+    };
+    const pollPromise = pollConsole();
 
     try {
         const r = await fetch(`/api/workflows/${encodeURIComponent(name)}/run`, { method: 'POST' });
@@ -860,9 +885,30 @@ document.getElementById('run-workflow-btn').addEventListener('click', async () =
     } catch (err) {
         showMessage('runner-message', 'error', 'Error: ' + err.message);
     } finally {
+        // Stop polling and do one final fetch
+        polling = false;
+        await pollPromise;
+        try {
+            const cr = await fetch(`/api/workflows/${encodeURIComponent(name)}/console`);
+            const cd = await cr.json();
+            if (cd.output) {
+                consoleOut.textContent = cd.output;
+                consoleOut.scrollTop = consoleOut.scrollHeight;
+            }
+        } catch (_) { }
         btn.disabled = false;
         btn.textContent = 'Run Now';
     }
+});
+
+document.getElementById('close-console-btn').addEventListener('click', () => {
+    document.getElementById('live-console').classList.remove('open');
+    document.getElementById('live-console-backdrop').classList.remove('active');
+});
+
+document.getElementById('live-console-backdrop').addEventListener('click', () => {
+    document.getElementById('live-console').classList.remove('open');
+    document.getElementById('live-console-backdrop').classList.remove('active');
 });
 
 // Schedules
