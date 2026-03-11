@@ -14,6 +14,7 @@ services:
       - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
       - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
       - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+      - NEXUS_CREDENTIAL_KEY=${NEXUS_CREDENTIAL_KEY}
     restart: unless-stopped
     networks:
       - nexus-network

@@ -19,7 +19,8 @@ try {
         'nexus-terraform',
         'nexus-python',
         'nexus-shell',
-        'nexus-webhooks'
+        'nexus-webhooks',
+        'nexus-credentials'
     )
 
     $created = @()

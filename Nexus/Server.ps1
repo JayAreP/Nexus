@@ -91,6 +91,103 @@ Start-PodeServer -Threads 2 {
         }
     }
 
+    # ===== CREDENTIAL STORE HELPERS =====
+    # Credential type definitions — each type defines its fields and which are secret
+    $script:CredentialTypes = @{
+        'usernamepassword' = @{
+            label  = 'Username / Password'
+            fields = @(
+                @{ name = 'username'; label = 'Username'; type = 'text';     secret = $false }
+                @{ name = 'password'; label = 'Password'; type = 'password'; secret = $true  }
+            )
+        }
+        'azureserviceprincipal' = @{
+            label  = 'Azure Service Principal'
+            fields = @(
+                @{ name = 'tenantId';     label = 'Tenant ID';     type = 'text';     secret = $false }
+                @{ name = 'clientId';     label = 'Client ID';     type = 'text';     secret = $false }
+                @{ name = 'clientSecret'; label = 'Client Secret'; type = 'password'; secret = $true  }
+            )
+        }
+        'apikey' = @{
+            label  = 'API Key'
+            fields = @(
+                @{ name = 'headerName'; label = 'Header Name'; type = 'text';     secret = $false }
+                @{ name = 'key';        label = 'API Key';     type = 'password'; secret = $true  }
+            )
+        }
+        'oauth2' = @{
+            label  = 'OAuth2 Client Credentials'
+            fields = @(
+                @{ name = 'tokenUrl';     label = 'Token URL';     type = 'text';     secret = $false }
+                @{ name = 'clientId';     label = 'Client ID';     type = 'text';     secret = $false }
+                @{ name = 'clientSecret'; label = 'Client Secret'; type = 'password'; secret = $true  }
+                @{ name = 'scope';        label = 'Scope';         type = 'text';     secret = $false }
+            )
+        }
+        'aws' = @{
+            label  = 'AWS Credentials'
+            fields = @(
+                @{ name = 'accessKeyId';     label = 'Access Key ID';     type = 'text';     secret = $false }
+                @{ name = 'secretAccessKey'; label = 'Secret Access Key'; type = 'password'; secret = $true  }
+                @{ name = 'region';          label = 'Region';            type = 'text';     secret = $false }
+            )
+        }
+        'gcp' = @{
+            label  = 'GCP Service Account'
+            fields = @(
+                @{ name = 'projectId';    label = 'Project ID';       type = 'text';     secret = $false }
+                @{ name = 'clientEmail';  label = 'Client Email';     type = 'text';     secret = $false }
+                @{ name = 'privateKey';   label = 'Private Key JSON'; type = 'textarea'; secret = $true  }
+            )
+        }
+        'connectionstring' = @{
+            label  = 'Connection String'
+            fields = @(
+                @{ name = 'connectionString'; label = 'Connection String'; type = 'password'; secret = $true }
+            )
+        }
+        'token' = @{
+            label  = 'Bearer Token'
+            fields = @(
+                @{ name = 'token'; label = 'Token'; type = 'password'; secret = $true }
+            )
+        }
+    }
+
+    function Protect-CredentialValue {
+        param([string]$Plaintext)
+        $keyBase64 = $env:NEXUS_CREDENTIAL_KEY
+        if (-not $keyBase64) { throw 'NEXUS_CREDENTIAL_KEY environment variable is not set' }
+        $key = [Convert]::FromBase64String($keyBase64)
+        $aes = [System.Security.Cryptography.Aes]::Create()
+        $aes.Key = $key
+        $aes.GenerateIV()
+        $encryptor = $aes.CreateEncryptor()
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Plaintext)
+        $encrypted = $encryptor.TransformFinalBlock($bytes, 0, $bytes.Length)
+        $payload = $aes.IV + $encrypted
+        $aes.Dispose()
+        return "ENC::$([Convert]::ToBase64String($payload))"
+    }
+
+    function Unprotect-CredentialValue {
+        param([string]$Encrypted)
+        $keyBase64 = $env:NEXUS_CREDENTIAL_KEY
+        if (-not $keyBase64) { throw 'NEXUS_CREDENTIAL_KEY environment variable is not set' }
+        $raw = $Encrypted -replace '^ENC::', ''
+        $payload = [Convert]::FromBase64String($raw)
+        $key = [Convert]::FromBase64String($keyBase64)
+        $aes = [System.Security.Cryptography.Aes]::Create()
+        $aes.Key = $key
+        $aes.IV = $payload[0..15]
+        $decryptor = $aes.CreateDecryptor()
+        $ciphertext = $payload[16..($payload.Length - 1)]
+        $decrypted = $decryptor.TransformFinalBlock($ciphertext, 0, $ciphertext.Length)
+        $aes.Dispose()
+        return [System.Text.Encoding]::UTF8.GetString($decrypted)
+    }
+
     # ===== STATIC ROUTE =====
     Add-PodeRoute -Method Get -Path '/' -ScriptBlock {
         Write-PodeFileResponse -Path './public/index.html' -ContentType 'text/html'
@@ -343,6 +440,79 @@ Start-PodeServer -Threads 2 {
         try {
             Remove-Blob -Container 'nexus-config' -BlobPath "filechecks/$name.json"
             Write-PodeJsonResponse -Value @{ success = $true; message = "File Check '$name' deleted" }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # ===== CREDENTIAL STORE ROUTES =====
+
+    # Get credential type definitions (for dynamic form rendering)
+    Add-PodeRoute -Method Get -Path '/api/credentials/types' -ScriptBlock {
+        Write-PodeJsonResponse -Value @{ success = $true; types = $using:CredentialTypes }
+    }
+
+    # List all credentials (metadata only, no secrets)
+    Add-PodeRoute -Method Get -Path '/api/credentials' -ScriptBlock {
+        try {
+            $result = & './Scripts/PODE/ListCredentials.ps1'
+            Write-PodeJsonResponse -Value $result
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Get a single credential (secrets masked)
+    Add-PodeRoute -Method Get -Path '/api/credentials/:name' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        try {
+            $result = & './Scripts/PODE/GetCredential.ps1' -Name $name
+            if ($result.statusCode) {
+                Write-PodeJsonResponse -Value $result -StatusCode $result.statusCode
+            } else {
+                Write-PodeJsonResponse -Value $result
+            }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Save a credential (create or update)
+    Add-PodeRoute -Method Post -Path '/api/credentials' -ScriptBlock {
+        $body = $WebEvent.Data
+        try {
+            $result = & './Scripts/PODE/SaveCredential.ps1' -CredentialJson ($body | ConvertTo-Json -Depth 10) -CredentialTypesJson ($using:CredentialTypes | ConvertTo-Json -Depth 10)
+            if ($result.statusCode) {
+                Write-PodeJsonResponse -Value $result -StatusCode $result.statusCode
+            } else {
+                Write-PodeJsonResponse -Value $result
+            }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Delete a credential
+    Add-PodeRoute -Method Delete -Path '/api/credentials/:name' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        try {
+            Remove-Blob -Container 'nexus-credentials' -BlobPath "$name.json"
+            Write-PodeJsonResponse -Value @{ success = $true; message = "Credential '$name' deleted" }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Resolve credential — returns decrypted values (for script/API consumption)
+    Add-PodeRoute -Method Get -Path '/api/credentials/:name/resolve' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        try {
+            $result = & './Scripts/PODE/ResolveCredential.ps1' -Name $name
+            if ($result.statusCode) {
+                Write-PodeJsonResponse -Value $result -StatusCode $result.statusCode
+            } else {
+                Write-PodeJsonResponse -Value $result
+            }
         } catch {
             Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
         }
