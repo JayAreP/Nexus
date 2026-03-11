@@ -43,11 +43,19 @@ try {
     Write-Host "Failed to start sandbox terminal: $($_.Exception.Message)" -ForegroundColor Red
 }
 
-Start-PodeServer -Threads 2 {
+Start-PodeServer -Threads 4 {
     Add-PodeEndpoint -Address 0.0.0.0 -Port 8080 -Protocol Http
     Enable-PodeSessionMiddleware -Duration 3600 -Extend
     Add-PodeStaticRoute -Path '/static' -Source './public'
     New-PodeLoggingMethod -Terminal | Enable-PodeErrorLogging
+
+    # Thread-safe lock to prevent concurrent runs of the same workflow
+    $lockTable = [System.Collections.Concurrent.ConcurrentDictionary[string, byte]]::new()
+    Set-PodeState -Name 'RunningWorkflows' -Value $lockTable | Out-Null
+
+    # Store for async workflow results
+    $resultTable = [System.Collections.Concurrent.ConcurrentDictionary[string, hashtable]]::new()
+    Set-PodeState -Name 'WorkflowResults' -Value $resultTable | Out-Null
 
     # ===== BLOB STORAGE HELPERS =====
     # Container layout on configured storage account:
@@ -88,6 +96,20 @@ Start-PodeServer -Threads 2 {
         } finally {
             if (Test-Path $tempFile) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
         }
+    }
+
+    # ===== ENGINE LOG =====
+    # Thread-safe append-only log for internal workflow engine events
+    $engineLogFile = Join-Path ([System.IO.Path]::GetTempPath()) 'nexus-engine.log'
+    [System.IO.File]::WriteAllText($engineLogFile, "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [ENGINE] Nexus server started`n", [System.Text.Encoding]::UTF8)
+    Set-PodeState -Name 'EngineLogFile' -Value $engineLogFile | Out-Null
+
+    function Write-EngineLog {
+        param([string]$Message, [string]$Level = 'INFO')
+        $logFile = Get-PodeState -Name 'EngineLogFile'
+        if (-not $logFile) { $logFile = Join-Path ([System.IO.Path]::GetTempPath()) 'nexus-engine.log' }
+        $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$Level] $Message`n"
+        try { [System.IO.File]::AppendAllText($logFile, $line, [System.Text.Encoding]::UTF8) } catch { }
     }
 
     function Remove-Blob {
@@ -747,30 +769,69 @@ Start-PodeServer -Threads 2 {
         }
     }
 
-    # Run a workflow manually
+    # Run a workflow manually — fires async and returns immediately
     Add-PodeRoute -Method Post -Path '/api/workflows/:name/run' -ScriptBlock {
         $name = $WebEvent.Parameters['name']
-        try {
-            $result = & './Scripts/PODE/RunWorkflow.ps1' -Name $name
-            if ($result.statusCode) {
-                Write-PodeJsonResponse -Value $result -StatusCode $result.statusCode
-            } else {
-                Write-PodeJsonResponse -Value $result
-            }
-        } catch {
-            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        $running = Get-PodeState -Name 'RunningWorkflows'
+        if (-not $running.TryAdd($name, [byte]0)) {
+            Write-EngineLog "RUN BLOCKED: '$name' — already running" 'WARN'
+            Write-PodeJsonResponse -Value @{ success = $false; message = "Workflow '$name' is already running" } -StatusCode 409
+            return
         }
+        Write-EngineLog "RUN REQUEST: '$name' — accepted, firing timer"
+        $results = Get-PodeState -Name 'WorkflowResults'
+        $results[$name] = @{ status = 'running'; message = '' }
+        # Fire a one-shot timer — runs in Pode's timer runspace with full server function access
+        $timerName = "wf-run-$name-$((Get-Date).Ticks)"
+        Add-PodeTimer -Name $timerName -Interval 1 -Limit 1 -ArgumentList @($name) -ScriptBlock {
+            param($wfName)
+            Write-EngineLog "TIMER FIRED: '$wfName' — starting execution"
+            $running = Get-PodeState -Name 'RunningWorkflows'
+            $results = Get-PodeState -Name 'WorkflowResults'
+            try {
+                $result = & './Scripts/PODE/RunWorkflow.ps1' -Name $wfName
+                $status = if ($result.success) { 'success' } else { 'failed' }
+                $results[$wfName] = @{ status = $status; message = $result.message }
+                Write-EngineLog "RUN COMPLETE: '$wfName' — $status — $($result.message)"
+            } catch {
+                $results[$wfName] = @{ status = 'failed'; message = $_.Exception.Message }
+                Write-EngineLog "RUN EXCEPTION: '$wfName' — $($_.Exception.Message)" 'ERROR'
+            } finally {
+                [void]$running.TryRemove($wfName, [ref][byte]0)
+                Write-EngineLog "LOCK RELEASED: '$wfName'"
+            }
+        }
+        Write-PodeJsonResponse -Value @{ success = $true; message = "Workflow '$name' started" }
     }
 
     # Live console output (polls temp file written by RunWorkflow)
     Add-PodeRoute -Method Get -Path '/api/workflows/:name/console' -ScriptBlock {
         $name = $WebEvent.Parameters['name']
+        $running = Get-PodeState -Name 'RunningWorkflows'
+        $results = Get-PodeState -Name 'WorkflowResults'
+        $isRunning = $running.ContainsKey($name)
         $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-console-$($name.ToLower()).log"
+        $output = ''
         if (Test-Path $tempFile) {
-            $content = [System.IO.File]::ReadAllText($tempFile, [System.Text.Encoding]::UTF8)
-            Write-PodeJsonResponse -Value @{ running = $true; output = $content }
+            $output = [System.IO.File]::ReadAllText($tempFile, [System.Text.Encoding]::UTF8)
+        }
+        $result = @{ running = $isRunning; output = $output }
+        if (-not $isRunning -and $results.ContainsKey($name)) {
+            $result.status = $results[$name].status
+            $result.message = $results[$name].message
+        }
+        Write-PodeJsonResponse -Value $result
+    }
+
+    # Engine log viewer — returns last N lines
+    Add-PodeRoute -Method Get -Path '/api/engine-log' -ScriptBlock {
+        $lines = [int]($WebEvent.Query['lines'] ?? '200')
+        $logFile = Get-PodeState -Name 'EngineLogFile'
+        if ($logFile -and (Test-Path $logFile)) {
+            $content = Get-Content -Path $logFile -Tail $lines -ErrorAction SilentlyContinue
+            Write-PodeJsonResponse -Value @{ success = $true; log = ($content -join "`n") }
         } else {
-            Write-PodeJsonResponse -Value @{ running = $false; output = '' }
+            Write-PodeJsonResponse -Value @{ success = $true; log = '(no engine log found)' }
         }
     }
 
@@ -1013,8 +1074,21 @@ Start-PodeServer -Threads 2 {
                     $now = Get-Date
                     $nextRun = [DateTime]::Parse($schedule.nextRun)
                     if ($now -ge $nextRun) {
-                        # Run the workflow
-                        & './Scripts/PODE/RunWorkflow.ps1' -Name $schedule.workflow | Out-Null
+                        # Skip if already running
+                        $running = Get-PodeState -Name 'RunningWorkflows'
+                        if (-not $running.TryAdd($schedule.workflow, [byte]0)) {
+                            Write-EngineLog "SCHEDULE SKIP: '$($schedule.workflow)' — already running" 'WARN'
+                            Write-Host "Skipping scheduled run of '$($schedule.workflow)' — already running" -ForegroundColor Yellow
+                            continue
+                        }
+                        Write-EngineLog "SCHEDULE FIRED: '$($schedule.workflow)' from $($blob.Name)"
+                        try {
+                            # Run the workflow
+                            & './Scripts/PODE/RunWorkflow.ps1' -Name $schedule.workflow | Out-Null
+                            Write-EngineLog "SCHEDULE COMPLETE: '$($schedule.workflow)'"
+                        } finally {
+                            [void]$running.TryRemove($schedule.workflow, [ref][byte]0)
+                        }
 
                         # Advance nextRun based on interval
                         switch ($schedule.interval) {

@@ -1278,15 +1278,33 @@ document.getElementById('run-workflow-btn').addEventListener('click', async () =
     btn.textContent = 'Running...';
     showMessage('runner-message', 'info', `Starting workflow "${name}"...`);
 
-    // Show console and start polling
+    // Show console
     consoleOut.textContent = 'Waiting for output...\n';
     document.getElementById('live-console-title').textContent = `Console — ${name}`;
     consoleEl.classList.add('open');
     document.getElementById('live-console-backdrop').classList.add('active');
 
-    let polling = true;
-    const pollConsole = async () => {
-        while (polling) {
+    // Fire the run — returns immediately now
+    try {
+        const r = await fetch(`/api/workflows/${encodeURIComponent(name)}/run`, { method: 'POST' });
+        const data = await r.json();
+        if (!data.success) {
+            showMessage('runner-message', 'error', data.message);
+            btn.disabled = false;
+            btn.textContent = 'Run Now';
+            return;
+        }
+    } catch (err) {
+        showMessage('runner-message', 'error', 'Error: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Run Now';
+        return;
+    }
+
+    // Poll console until workflow finishes
+    const poll = async () => {
+        while (true) {
+            await new Promise(r => setTimeout(r, 2000));
             try {
                 const cr = await fetch(`/api/workflows/${encodeURIComponent(name)}/console`);
                 const cd = await cr.json();
@@ -1294,33 +1312,19 @@ document.getElementById('run-workflow-btn').addEventListener('click', async () =
                     consoleOut.textContent = cd.output;
                     consoleOut.scrollTop = consoleOut.scrollHeight;
                 }
+                if (!cd.running) {
+                    // Workflow finished — show final status
+                    const status = cd.status || 'unknown';
+                    const msg = cd.message || `Workflow "${name}" finished (${status})`;
+                    showMessage('runner-message', status === 'success' ? 'success' : 'error', msg);
+                    break;
+                }
             } catch (_) { }
-            await new Promise(r => setTimeout(r, 2000));
         }
     };
-    const pollPromise = pollConsole();
-
-    try {
-        const r = await fetch(`/api/workflows/${encodeURIComponent(name)}/run`, { method: 'POST' });
-        const data = await r.json();
-        showMessage('runner-message', data.success ? 'success' : 'error', data.message);
-    } catch (err) {
-        showMessage('runner-message', 'error', 'Error: ' + err.message);
-    } finally {
-        // Stop polling and do one final fetch
-        polling = false;
-        await pollPromise;
-        try {
-            const cr = await fetch(`/api/workflows/${encodeURIComponent(name)}/console`);
-            const cd = await cr.json();
-            if (cd.output) {
-                consoleOut.textContent = cd.output;
-                consoleOut.scrollTop = consoleOut.scrollHeight;
-            }
-        } catch (_) { }
-        btn.disabled = false;
-        btn.textContent = 'Run Now';
-    }
+    await poll();
+    btn.disabled = false;
+    btn.textContent = 'Run Now';
 });
 
 document.getElementById('close-console-btn').addEventListener('click', () => {
@@ -1331,6 +1335,24 @@ document.getElementById('close-console-btn').addEventListener('click', () => {
 document.getElementById('live-console-backdrop').addEventListener('click', () => {
     document.getElementById('live-console').classList.remove('open');
     document.getElementById('live-console-backdrop').classList.remove('active');
+});
+
+// Engine Log viewer
+document.getElementById('engine-log-btn').addEventListener('click', async () => {
+    const modal = document.getElementById('preview-modal');
+    document.getElementById('preview-modal-title').textContent = 'Engine Log';
+    const contentEl = document.getElementById('preview-modal-content');
+    contentEl.textContent = 'Loading...';
+    contentEl.style.whiteSpace = 'pre';
+    modal.style.display = 'flex';
+    try {
+        const r = await fetch('/api/engine-log?lines=300');
+        const data = await r.json();
+        contentEl.textContent = data.log || '(empty)';
+        contentEl.scrollTop = contentEl.scrollHeight;
+    } catch (err) {
+        contentEl.textContent = 'Failed to load engine log: ' + err.message;
+    }
 });
 
 // Schedules

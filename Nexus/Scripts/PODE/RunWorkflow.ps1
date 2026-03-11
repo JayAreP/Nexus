@@ -4,9 +4,19 @@ param(
     [Parameter(Mandatory)] [string]$Name
 )
 
+# Engine log helper (same file as Server.ps1 writes to)
+$script:EngineLogFile = Join-Path ([System.IO.Path]::GetTempPath()) 'nexus-engine.log'
+function Write-EngineLog {
+    param([string]$Message, [string]$Level = 'INFO')
+    $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$Level] $Message`n"
+    try { [System.IO.File]::AppendAllText($script:EngineLogFile, $line, [System.Text.Encoding]::UTF8) } catch { }
+}
+
 $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
 $logBaseName = "$Name-$timestamp"
 $logContainerName = ($Name -replace '[^a-z0-9-]', '-').ToLower()
+
+Write-EngineLog "WORKFLOW START: '$Name' (run: $logBaseName, steps: pending)"
 
 # Ensure log container exists
 try {
@@ -25,6 +35,7 @@ if (-not $wfContent) {
 
 $workflow = $wfContent | ConvertFrom-Json
 $steps = @($workflow.steps)
+Write-EngineLog "WORKFLOW LOADED: '$Name' — $($steps.Count) steps"
 
 $runLog = @{
     workflow  = $Name
@@ -39,7 +50,7 @@ $allErrors = [System.Text.StringBuilder]::new()
 
 # Live console temp file — frontend polls this for real-time output
 $consoleTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-console-$($Name.ToLower()).log"
-[System.IO.File]::WriteAllText($consoleTempFile, "", [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText($consoleTempFile, "========== RUN: $logBaseName ==========`n`n", [System.Text.Encoding]::UTF8)
 
 $capturedOutputs = @{}  # Variable store for output chaining between steps
 
@@ -67,6 +78,7 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
     try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
     $stepStartTime = Get-Date
+    Write-EngineLog "STEP START: '$Name' $stepLabel"
 
     try {
         # Build parameters from KV pairs + input mappings
@@ -444,6 +456,7 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
         $stepLog.status = 'failed'
         $stepLog.error = $_.Exception.Message
         $allPassed = $false
+        Write-EngineLog "STEP FAILED: '$Name' $stepLabel — $($_.Exception.Message)" 'ERROR'
 
         # Log the error
         [void]$allErrors.AppendLine("=========================================")
@@ -461,6 +474,7 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
 
     $stepLog.duration = [math]::Round(((Get-Date) - $stepStartTime).TotalSeconds, 2)
     $runLog.steps += $stepLog
+    if ($stepLog.status -eq 'success') { Write-EngineLog "STEP DONE: '$Name' $stepLabel — $($stepLog.duration)s" }
 
     # Stop on failure
     if ($stepLog.status -eq 'failed') {
@@ -503,6 +517,7 @@ try {
 try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
 $statusMsg = if ($allPassed) { "Workflow '$Name' completed successfully ($($steps.Count) steps)" } else { "Workflow '$Name' failed at step $($runLog.steps.Count)" }
+Write-EngineLog "WORKFLOW END: '$Name' — $($runLog.status) — $statusMsg"
 return @{
     success = $allPassed
     message = $statusMsg
