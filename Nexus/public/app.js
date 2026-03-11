@@ -115,13 +115,15 @@ document.getElementById('script-help-btn').addEventListener('click', () => {
     contentEl.innerHTML = `
 <div style="font-size: 13px; line-height: 1.7; color: var(--text-primary); padding: 4px;">
 <h3 style="margin: 0 0 8px 0; font-size: 15px;">How Output Chaining Works</h3>
-<p style="margin: 0 0 12px 0;">When a workflow runs, each step's <strong>entire STDOUT</strong> is captured as a single string.
-At the end of each step, the engine attempts to parse that output as <strong>JSON</strong>.
-If the parse succeeds, every top-level property is registered as <code>step{N}.{key}</code>
-and can be mapped as input to subsequent steps via <strong>Input Mapping</strong>.</p>
+<p style="margin: 0 0 12px 0;">When a workflow runs, each step's <strong>entire STDOUT</strong> is captured after the script exits.
+The engine then scans the output for valid JSON &mdash; first trying the full output, then scanning backward
+from the end to find the <strong>last JSON object or array</strong>. This means progress messages, banners, and other
+text printed before your final JSON are automatically ignored.</p>
 
-<p style="margin: 0 0 12px 0;">If the output is <em>not</em> valid JSON, the step still succeeds &mdash; the output is logged normally,
-but no variables are captured for chaining.</p>
+<p style="margin: 0 0 12px 0;">If valid JSON is found, every top-level property is registered as <code>step{N}.{key}</code>
+and can be mapped as input to subsequent steps via <strong>Input Mapping</strong>.
+If no JSON is found and the step has <strong>breakpoint checks</strong>, the step fails with:
+<em>&ldquo;expected a JSON response but none was found&rdquo;</em>.</p>
 
 <h3 style="margin: 16px 0 8px 0; font-size: 15px;">When Do I Need JSON Output?</h3>
 <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:16px;">
@@ -130,8 +132,8 @@ but no variables are captured for chaining.</p>
 <th style="padding:6px 10px;">Pure JSON Required?</th>
 </tr></thead><tbody>
 <tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Standalone script, no downstream steps use its output</td><td style="padding:6px 10px;"><strong>No</strong> &mdash; output anything you like</td></tr>
-<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Script output is mapped to a later step's input</td><td style="padding:6px 10px;"><strong>Yes</strong> &mdash; entire STDOUT must be valid JSON</td></tr>
-<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Breakpoint checks on output properties</td><td style="padding:6px 10px;"><strong>Yes</strong> &mdash; checked properties must exist in parsed JSON</td></tr>
+<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Script output is mapped to a later step's input</td><td style="padding:6px 10px;"><strong>Yes</strong> &mdash; JSON must appear as the last block in output (other text before it is OK)</td></tr>
+<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Breakpoint checks on output properties</td><td style="padding:6px 10px;"><strong>Yes</strong> &mdash; if no JSON is found at all, the step fails</td></tr>
 </tbody></table>
 
 <h3 style="margin: 16px 0 8px 0; font-size: 15px;">PowerShell</h3>

@@ -369,18 +369,61 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
         try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
         # Auto-register ALL JSON properties from output as step{N}.{key}
-        try {
-            $parsed = $output | ConvertFrom-Json -ErrorAction Stop
+        # Strategy: try full output first, then scan backward for last JSON block
+        $parsed = $null
+        $jsonExtracted = $false
+
+        if (![string]::IsNullOrWhiteSpace($output)) {
+            # Fast path: entire output is valid JSON
+            try {
+                $parsed = $output | ConvertFrom-Json -ErrorAction Stop
+                $jsonExtracted = $true
+            } catch {
+                # Slow path: scan backward from the end for the last JSON object/array
+                $lines = $output -split "`n"
+                for ($j = $lines.Count - 1; $j -ge 0; $j--) {
+                    $trimmed = $lines[$j].Trim()
+                    if ($trimmed -eq '}' -or $trimmed -eq ']') {
+                        # Found a potential JSON closing — find its opener
+                        $closer = $trimmed
+                        $opener = if ($closer -eq '}') { '{' } else { '[' }
+                        $depth = 0
+                        for ($k = $j; $k -ge 0; $k--) {
+                            foreach ($ch in $lines[$k].ToCharArray()) {
+                                if ($ch -eq $closer[0]) { $depth++ }
+                                elseif ($ch -eq $opener[0]) { $depth-- }
+                            }
+                            if ($depth -eq 0) {
+                                $candidate = ($lines[$k..$j]) -join "`n"
+                                try {
+                                    $parsed = $candidate | ConvertFrom-Json -ErrorAction Stop
+                                    $jsonExtracted = $true
+                                    break
+                                } catch {
+                                    # Not valid JSON at this position, keep scanning
+                                }
+                            }
+                        }
+                        if ($jsonExtracted) { break }
+                    }
+                }
+            }
+        }
+
+        if ($jsonExtracted -and $parsed) {
             foreach ($prop in $parsed.PSObject.Properties) {
                 $varName = "step$($i + 1).$($prop.Name)"
                 $capturedOutputs[$varName] = [string]$prop.Value
             }
-        } catch {
-            # Output wasn't valid JSON — no properties registered
         }
 
         # Breakpoint checks — validate required properties in output
+        $needsJson = $false
         if ($step.breakpointChecks) {
+            $needsJson = $true
+            if (-not $jsonExtracted) {
+                throw "Breakpoint failed: step $($i + 1) expected a JSON response but none was found in the script output. Please review the script to ensure it outputs valid JSON."
+            }
             foreach ($bp in @($step.breakpointChecks)) {
                 if (![string]::IsNullOrWhiteSpace($bp.key)) {
                     $actualValue = $capturedOutputs["step$($i + 1).$($bp.key)"]
