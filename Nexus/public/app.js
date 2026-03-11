@@ -1356,17 +1356,30 @@ document.getElementById('install-module-btn').addEventListener('click', async ()
 });
 
 // ===== INIT =====
+let serverTimeOffset = 0;
+
 async function loadVersion() {
     try {
         const r = await fetch('/api/version');
         const data = await r.json();
         document.getElementById('version-number').textContent = data.version || 'unknown';
+        if (data.serverTime) {
+            serverTimeOffset = new Date(data.serverTime).getTime() - Date.now();
+        }
     } catch (err) {
         document.getElementById('version-number').textContent = 'error';
     }
 }
 
+function tickServerTime() {
+    const now = new Date(Date.now() + serverTimeOffset);
+    const pad = n => String(n).padStart(2, '0');
+    document.getElementById('server-time').textContent =
+        `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadVersion();
     loadWorkflowList();
+    setInterval(tickServerTime, 1000);
 });

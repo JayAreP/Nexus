@@ -104,9 +104,9 @@ Start-PodeServer -Threads 2 {
             } else {
                 'dev'
             }
-            Write-PodeJsonResponse -Value @{ version = $version }
+            Write-PodeJsonResponse -Value @{ version = $version; serverTime = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') }
         } catch {
-            Write-PodeJsonResponse -Value @{ version = 'unknown' }
+            Write-PodeJsonResponse -Value @{ version = 'unknown'; serverTime = '' }
         }
     }
 
