@@ -895,6 +895,36 @@ Start-PodeServer -Threads 2 {
         }
     }
 
+    # Remove a PowerShell module
+    Add-PodeRoute -Method Delete -Path '/api/modules/:name' -ScriptBlock {
+        $moduleName = $WebEvent.Parameters['name']
+        if ([string]::IsNullOrWhiteSpace($moduleName) -or $moduleName -notmatch '^[a-zA-Z0-9._-]+$') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Invalid module name' } -StatusCode 400
+            return
+        }
+        try {
+            # Unload from memory if loaded
+            Remove-Module -Name $moduleName -Force -ErrorAction SilentlyContinue
+
+            # Remove all versions from all module paths
+            $removed = $false
+            $env:PSModulePath -split ':' | ForEach-Object {
+                $modulePath = Join-Path $_ $moduleName
+                if (Test-Path $modulePath) {
+                    Remove-Item -Path $modulePath -Recurse -Force
+                    $removed = $true
+                }
+            }
+            if ($removed) {
+                Write-PodeJsonResponse -Value @{ success = $true; message = "Module '$moduleName' removed" }
+            } else {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Module '$moduleName' not found on disk" } -StatusCode 404
+            }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = "Remove failed: $($_.Exception.Message)" } -StatusCode 500
+        }
+    }
+
     # Install a PowerShell module from GitHub
     Add-PodeRoute -Method Post -Path '/api/modules/github' -ScriptBlock {
         $body = $WebEvent.Data

@@ -107,6 +107,107 @@ document.getElementById('prepare-containers-btn').addEventListener('click', asyn
 // ===== SCRIPTS =====
 let currentScriptType = 'powershell';
 
+// Script Output Help
+document.getElementById('script-help-btn').addEventListener('click', () => {
+    const modal = document.getElementById('preview-modal');
+    document.getElementById('preview-modal-title').textContent = 'Script Output & Workflow Chaining Guide';
+    const contentEl = document.getElementById('preview-modal-content');
+    contentEl.innerHTML = `
+<div style="font-size: 13px; line-height: 1.7; color: var(--text-primary); padding: 4px;">
+<h3 style="margin: 0 0 8px 0; font-size: 15px;">How Output Chaining Works</h3>
+<p style="margin: 0 0 12px 0;">When a workflow runs, each step's <strong>entire STDOUT</strong> is captured as a single string.
+At the end of each step, the engine attempts to parse that output as <strong>JSON</strong>.
+If the parse succeeds, every top-level property is registered as <code>step{N}.{key}</code>
+and can be mapped as input to subsequent steps via <strong>Input Mapping</strong>.</p>
+
+<p style="margin: 0 0 12px 0;">If the output is <em>not</em> valid JSON, the step still succeeds &mdash; the output is logged normally,
+but no variables are captured for chaining.</p>
+
+<h3 style="margin: 16px 0 8px 0; font-size: 15px;">When Do I Need JSON Output?</h3>
+<table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:16px;">
+<thead><tr style="border-bottom:2px solid #e2e8f0; text-align:left;">
+<th style="padding:6px 10px;">Scenario</th>
+<th style="padding:6px 10px;">Pure JSON Required?</th>
+</tr></thead><tbody>
+<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Standalone script, no downstream steps use its output</td><td style="padding:6px 10px;"><strong>No</strong> &mdash; output anything you like</td></tr>
+<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Script output is mapped to a later step's input</td><td style="padding:6px 10px;"><strong>Yes</strong> &mdash; entire STDOUT must be valid JSON</td></tr>
+<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Breakpoint checks on output properties</td><td style="padding:6px 10px;"><strong>Yes</strong> &mdash; checked properties must exist in parsed JSON</td></tr>
+</tbody></table>
+
+<h3 style="margin: 16px 0 8px 0; font-size: 15px;">PowerShell</h3>
+<p style="margin: 0 0 6px 0;"><code>Write-Output</code>, <code>return</code>, and bare expressions go to STDOUT and <strong>are captured</strong>.<br>
+<code>Write-Host</code> in PowerShell 7 writes to the Information stream but is <strong>also captured</strong> in the workflow engine via <code>2>&amp;1</code> redirection, meaning it will pollute your JSON output.</p>
+
+<p style="margin: 0 0 4px 0;"><strong>Suppressing unwanted output:</strong></p>
+<pre style="background: #1a202c; color: #e2e8f0; padding: 12px; overflow-x: auto; white-space: pre-wrap; font-size: 12px; margin: 0 0 12px 0;"><code># Suppress noisy cmdlet output
+Connect-AzAccount ... | Out-Null
+$result = Some-Command 6>&1  # redirect info stream away
+
+# Global preference to silence verbose/progress
+$VerbosePreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
+
+# Safe pattern: do all work, emit JSON last
+Write-Host "Working..."   # will pollute STDOUT!
+$ProgressPreference = 'SilentlyContinue'
+
+# Instead, write progress to stderr:
+[Console]::Error.WriteLine("Working...")
+
+# Then emit clean JSON as the final output
+[PSCustomObject]@{ id = $result.Id; status = "done" } | ConvertTo-Json -Compress</code></pre>
+
+<h3 style="margin: 16px 0 8px 0; font-size: 15px;">Python</h3>
+<p style="margin: 0 0 6px 0;"><code>print()</code> goes to STDOUT and is captured. Use <code>sys.stderr</code> for progress messages.</p>
+<pre style="background: #1a202c; color: #e2e8f0; padding: 12px; overflow-x: auto; white-space: pre-wrap; font-size: 12px; margin: 0 0 12px 0;"><code>import sys, json
+
+# Progress to stderr (not captured as output)
+print("Working...", file=sys.stderr)
+
+# Final JSON result to stdout
+result = {"id": 123, "status": "done"}
+print(json.dumps(result))</code></pre>
+
+<h3 style="margin: 16px 0 8px 0; font-size: 15px;">Shell (Bash)</h3>
+<p style="margin: 0 0 6px 0;"><code>echo</code> and general output goes to STDOUT. Use <code>&gt;&amp;2</code> for progress lines.</p>
+<pre style="background: #1a202c; color: #e2e8f0; padding: 12px; overflow-x: auto; white-space: pre-wrap; font-size: 12px; margin: 0 0 12px 0;"><code>#!/bin/bash
+
+# Progress to stderr
+echo "Working..." >&2
+
+# Final JSON output to stdout
+echo '{"id": 123, "status": "done"}'</code></pre>
+
+<h3 style="margin: 16px 0 8px 0; font-size: 15px;">Terraform</h3>
+<p style="margin: 0 0 6px 0;">Terraform steps are handled differently. After <code>terraform apply</code>, the engine automatically runs
+<code>terraform output -json</code> and appends it. All Terraform outputs are captured as step variables.
+You don't need to manage STDOUT &mdash; just define your <code>output</code> blocks in HCL.</p>
+<pre style="background: #1a202c; color: #e2e8f0; padding: 12px; overflow-x: auto; white-space: pre-wrap; font-size: 12px; margin: 0 0 12px 0;"><code># In your .tf file — these become step variables automatically
+output "resource_id" {
+  value = azurerm_resource.example.id
+}
+output "ip_address" {
+  value = azurerm_public_ip.example.ip_address
+}</code></pre>
+
+<h3 style="margin: 16px 0 8px 0; font-size: 15px;">Quick Reference: STDOUT vs STDERR</h3>
+<table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:8px;">
+<thead><tr style="border-bottom:2px solid #e2e8f0; text-align:left;">
+<th style="padding:6px 10px;">Language</th>
+<th style="padding:6px 10px;">STDOUT (captured)</th>
+<th style="padding:6px 10px;">STDERR (safe for progress)</th>
+<th style="padding:6px 10px;">Suppress noisy commands</th>
+</tr></thead><tbody>
+<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">PowerShell</td><td style="padding:6px 10px;"><code>Write-Output</code>, <code>return</code></td><td style="padding:6px 10px;"><code>[Console]::Error.WriteLine()</code></td><td style="padding:6px 10px;"><code>| Out-Null</code>, <code>$null = ...</code></td></tr>
+<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Python</td><td style="padding:6px 10px;"><code>print()</code></td><td style="padding:6px 10px;"><code>print(..., file=sys.stderr)</code></td><td style="padding:6px 10px;">Don't <code>print()</code> until the end</td></tr>
+<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Shell</td><td style="padding:6px 10px;"><code>echo</code></td><td style="padding:6px 10px;"><code>echo ... >&amp;2</code></td><td style="padding:6px 10px;">Redirect: <code>cmd > /dev/null</code></td></tr>
+<tr style="border-bottom:1px solid #edf2f7;"><td style="padding:6px 10px;">Terraform</td><td style="padding:6px 10px;">Automatic (<code>output</code> blocks)</td><td style="padding:6px 10px;">N/A</td><td style="padding:6px 10px;">N/A &mdash; managed by engine</td></tr>
+</tbody></table>
+</div>`;
+    contentEl.style.whiteSpace = 'normal';
+    modal.style.display = 'flex';
+});
+
 document.querySelectorAll('.script-tab').forEach(tab => {
     tab.addEventListener('click', () => {
         document.querySelectorAll('.script-tab').forEach(t => {
@@ -1674,9 +1775,9 @@ document.getElementById('show-modules-btn').addEventListener('click', async () =
         if (data.success) {
             if (currentModuleType === 'powershell' && data.modules && data.modules.length > 0) {
                 let html = '<table style="width: 100%; font-size: 13px; border-collapse: collapse;">';
-                html += '<thead><tr style="border-bottom: 2px solid #e2e8f0; text-align: left;"><th style="padding: 8px 12px;">Name</th><th style="padding: 8px 12px;">Version</th><th style="padding: 8px 12px;">Path</th></tr></thead><tbody>';
+                html += '<thead><tr style="border-bottom: 2px solid #e2e8f0; text-align: left;"><th style="padding: 8px 12px;">Name</th><th style="padding: 8px 12px;">Version</th><th style="padding: 8px 12px;">Path</th><th style="padding: 8px 12px;"></th></tr></thead><tbody>';
                 data.modules.forEach(m => {
-                    html += `<tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 8px 12px; font-weight: 500;">${escHtml(m.name)}</td><td style="padding: 8px 12px;">${escHtml(m.version)}</td><td style="padding: 8px 12px; font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escHtml(m.path)}</td></tr>`;
+                    html += `<tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 8px 12px; font-weight: 500;">${escHtml(m.name)}</td><td style="padding: 8px 12px;">${escHtml(m.version)}</td><td style="padding: 8px 12px; font-size: 11px; color: var(--text-secondary); font-family: monospace;">${escHtml(m.path)}</td><td style="padding: 8px 12px;"><button class="btn btn-danger" style="font-size:0.75rem; padding:2px 8px;" onclick="removeModule('${escHtml(m.name)}')">Remove</button></td></tr>`;
                 });
                 html += '</tbody></table>';
                 outputEl.innerHTML = html;
@@ -1749,6 +1850,19 @@ document.getElementById('install-module-btn').addEventListener('click', async ()
         btn.textContent = 'Install';
     }
 });
+
+async function removeModule(name) {
+    if (!confirm(`Remove module "${name}"?`)) return;
+    clearMessage('modules-message');
+    try {
+        const r = await fetch(`/api/modules/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        const data = await r.json();
+        showMessage('modules-message', data.success ? 'success' : 'error', data.message);
+        if (data.success) document.getElementById('show-modules-btn').click();
+    } catch (err) {
+        showMessage('modules-message', 'error', 'Error: ' + err.message);
+    }
+}
 
 // Install from GitHub
 document.getElementById('install-github-btn').addEventListener('click', async () => {
