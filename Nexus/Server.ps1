@@ -399,6 +399,24 @@ Start-PodeServer -Threads 4 {
         }
     }
 
+    # Auto-detect script parameters by parsing the script source
+    Add-PodeRoute -Method Get -Path '/api/scripts/:type/:name/parameters' -ScriptBlock {
+        $scriptType = $WebEvent.Parameters['type']
+        $scriptName = $WebEvent.Parameters['name']
+        $container = "nexus-$scriptType"
+        try {
+            $content = Read-Blob -Container $container -BlobPath $scriptName
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Script '$scriptName' not found" } -StatusCode 404
+                return
+            }
+            $result = & './Scripts/PODE/Get-ScriptParameters.ps1' -Type $scriptType -Content $content
+            Write-PodeJsonResponse -Value $result
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
     # Delete a script
     Add-PodeRoute -Method Delete -Path '/api/scripts/:type/:name' -ScriptBlock {
         $scriptType = $WebEvent.Parameters['type']

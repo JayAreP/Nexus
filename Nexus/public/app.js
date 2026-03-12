@@ -963,10 +963,20 @@ function renderLadder() {
 
         let kvHtml = '';
         (step.params || []).forEach((kv, ki) => {
+            const mandatoryIcon = kv.mandatory ? '<span title="Mandatory" style="position: absolute; left: -20px; color: #e53e3e; font-size: 14px;">⚠</span>' : '';
+            const placeholder = kv.type || 'Value';
+            let valueField;
+            if (kv.validateSet && kv.validateSet.length > 0) {
+                const opts = kv.validateSet.map(v => `<option value="${escHtml(v)}"${v === (kv.value || '') ? ' selected' : ''}>${escHtml(v)}</option>`).join('');
+                valueField = `<select class="kv-value" style="flex: 1; padding: 6px 10px; border: 1px solid #cbd5e0; font-size: 13px; font-family: inherit; color: var(--text-primary);"><option value="">-- select --</option>${opts}</select>`;
+            } else {
+                valueField = `<input type="text" class="kv-value" placeholder="${escHtml(placeholder)}" value="${escHtml(kv.value || '')}">`;
+            }
             kvHtml += `
-                <div class="kv-pair" data-kv-index="${ki}">
+                <div class="kv-pair" data-kv-index="${ki}" style="position: relative;">
+                    ${mandatoryIcon}
                     <input type="text" class="kv-key" placeholder="Key" value="${escHtml(kv.key || '')}">
-                    <input type="text" class="kv-value" placeholder="Value" value="${escHtml(kv.value || '')}">
+                    ${valueField}
                     <button class="kv-remove" onclick="removeKV(${idx}, ${ki})">×</button>
                 </div>
             `;
@@ -1018,7 +1028,10 @@ function renderLadder() {
                     <button class="add-kv-btn" onclick="addInputMapping(${idx})">+ Add Input Mapping</button>
                 </div>
                 ` : ''}
-                <label style="font-size: 12px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 6px;">Parameters</label>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                    <label style="font-size: 12px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Parameters</label>
+                    ${['powershell','shell','python','terraform'].includes(step.type) && step.script ? `<button class="btn btn-secondary btn-sm" style="font-size: 10px; padding: 2px 8px;" onclick="autoParams(${idx})">Auto</button>` : ''}
+                </div>
                 <div class="kv-list">${kvHtml}</div>
                 <button class="add-kv-btn" onclick="addKV(${idx})">+ Add Key/Value</button>
 
@@ -1045,13 +1058,20 @@ function readLadderState() {
     stepEls.forEach((stepEl, idx) => {
         if (!currentWorkflow.steps[idx]) return;
 
-        // Read params
+        // Read params (preserve mandatory/type/validateSet from auto-detection)
         const kvPairs = stepEl.querySelectorAll('.kv-list .kv-pair');
+        const oldParams = currentWorkflow.steps[idx].params || [];
         currentWorkflow.steps[idx].params = [];
-        kvPairs.forEach(kv => {
+        kvPairs.forEach((kv, ki) => {
             const key = kv.querySelector('.kv-key').value.trim();
             const value = kv.querySelector('.kv-value').value.trim();
-            if (key) currentWorkflow.steps[idx].params.push({ key, value });
+            const old = oldParams[ki] || {};
+            if (key) currentWorkflow.steps[idx].params.push({
+                key, value,
+                mandatory: !!old.mandatory,
+                type: old.type || '',
+                validateSet: old.validateSet || null
+            });
         });
 
         // Read breakpoint checks
@@ -1087,6 +1107,39 @@ function removeKV(stepIdx, kvIdx) {
     readLadderState();
     currentWorkflow.steps[stepIdx].params.splice(kvIdx, 1);
     renderLadder();
+}
+
+async function autoParams(stepIdx) {
+    readLadderState();
+    const step = currentWorkflow.steps[stepIdx];
+    if (!step || !step.script || !step.type) return;
+
+    try {
+        const r = await fetch(`/api/scripts/${encodeURIComponent(step.type)}/${encodeURIComponent(step.script)}/parameters`);
+        const data = await r.json();
+        if (!data.success) {
+            alert('Failed to detect parameters: ' + (data.message || 'unknown error'));
+            return;
+        }
+        if (!data.params || data.params.length === 0) {
+            alert('No parameters detected in this script.');
+            return;
+        }
+        // Build param list — preserve existing values if param already present
+        const existingMap = {};
+        (step.params || []).forEach(p => { if (p.key) existingMap[p.key] = p.value; });
+
+        step.params = data.params.map(p => ({
+            key: p.name,
+            value: existingMap[p.name] !== undefined ? existingMap[p.name] : (p.default || ''),
+            mandatory: !!p.mandatory,
+            type: p.type || '',
+            validateSet: p.validateSet || null
+        }));
+        renderLadder();
+    } catch (err) {
+        alert('Error detecting parameters: ' + err.message);
+    }
 }
 
 function addBreakpoint(stepIdx) {
