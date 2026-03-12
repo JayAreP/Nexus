@@ -569,6 +569,24 @@
         </div>
     </div>
 
+    <!-- Storage Browse Modal -->
+    <div id="browse-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 650px;">
+            <div class="modal-header">
+                <h2>Browse Storage</h2>
+                <button class="modal-close" id="close-browse-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="browse-breadcrumb" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px; font-family: monospace;"></div>
+                <div id="browse-loading" style="display: none; color: var(--text-secondary); font-size: 13px; padding: 16px 0;">Loading...</div>
+                <div id="browse-list" style="max-height: 50vh; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px;"></div>
+                <div style="margin-top: 12px; text-align: right;">
+                    <button type="button" id="browse-select-btn" class="btn btn-primary btn-sm" disabled>Select</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Export Workflow Modal -->
     <div id="export-modal" class="modal" style="display: none;">
         <div class="modal-content">

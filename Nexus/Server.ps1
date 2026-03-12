@@ -534,6 +534,93 @@ Start-PodeServer -Threads 4 {
         }
     }
 
+    # Browse containers on a file check's storage account
+    Add-PodeRoute -Method Get -Path '/api/filechecks/:name/containers' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        try {
+            $content = Read-Blob -Container 'nexus-config' -BlobPath "filechecks/$name.json"
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "File Check '$name' not found" } -StatusCode 404
+                return
+            }
+            $fc = $content | ConvertFrom-Json
+            $fcCtx = if ($fc.authType -eq 'sas') {
+                New-AzStorageContext -StorageAccountName $fc.storageAccount -SasToken $fc.sasToken
+            } else {
+                New-AzStorageContext -StorageAccountName $fc.storageAccount -UseConnectedAccount
+            }
+            $containers = Get-AzStorageContainer -Context $fcCtx -ErrorAction Stop |
+                ForEach-Object { @{ name = $_.Name } }
+            Write-PodeJsonResponse -Value @{ success = $true; containers = @($containers) }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Browse blobs/folders within a container on a file check's storage account
+    Add-PodeRoute -Method Get -Path '/api/filechecks/:name/browse' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        $container = $WebEvent.Query['container']
+        $prefix = $WebEvent.Query['prefix']
+        if ([string]::IsNullOrWhiteSpace($container)) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'container parameter required' } -StatusCode 400
+            return
+        }
+        try {
+            $content = Read-Blob -Container 'nexus-config' -BlobPath "filechecks/$name.json"
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "File Check '$name' not found" } -StatusCode 404
+                return
+            }
+            $fc = $content | ConvertFrom-Json
+            $fcCtx = if ($fc.authType -eq 'sas') {
+                New-AzStorageContext -StorageAccountName $fc.storageAccount -SasToken $fc.sasToken
+            } else {
+                New-AzStorageContext -StorageAccountName $fc.storageAccount -UseConnectedAccount
+            }
+            # Use delimiter to get virtual directories
+            $params = @{
+                Container = $container
+                Context   = $fcCtx
+                ErrorAction = 'Stop'
+            }
+            if (![string]::IsNullOrWhiteSpace($prefix)) {
+                $params.Prefix = $prefix
+            }
+            $blobs = Get-AzStorageBlob @params
+
+            # Extract virtual folders (prefixes) and files at this level
+            $folders = @{}
+            $files = @()
+            $prefixLen = if ($prefix) { $prefix.Length } else { 0 }
+
+            foreach ($b in $blobs) {
+                $relative = $b.Name.Substring($prefixLen)
+                $slashIdx = $relative.IndexOf('/')
+                if ($slashIdx -ge 0) {
+                    $folderName = $relative.Substring(0, $slashIdx)
+                    $fullPrefix = if ($prefix) { "$prefix$folderName/" } else { "$folderName/" }
+                    $folders[$folderName] = $fullPrefix
+                } else {
+                    $files += @{ name = $relative; fullPath = $b.Name; size = $b.Length }
+                }
+            }
+
+            $folderList = $folders.GetEnumerator() | Sort-Object Key | ForEach-Object {
+                @{ name = $_.Key; prefix = $_.Value }
+            }
+
+            Write-PodeJsonResponse -Value @{
+                success = $true
+                folders = @($folderList)
+                files   = @($files)
+                prefix  = ($prefix ?? '')
+            }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
     # ===== CREDENTIAL STORE ROUTES =====
 
     # Get credential type definitions (for dynamic form rendering)

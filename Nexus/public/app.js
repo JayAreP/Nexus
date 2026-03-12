@@ -972,11 +972,20 @@ function renderLadder() {
             } else {
                 valueField = `<input type="text" class="kv-value" placeholder="${escHtml(placeholder)}" value="${escHtml(kv.value || '')}">`;
             }
+            // Add Browse button for filecheck container/folderPath params
+            let browseBtn = '';
+            if (step.type === 'filecheck' && step.filecheck && (kv.key === 'container' || kv.key === 'folderPath')) {
+                const browseMode = kv.key === 'container' ? 'container' : 'folder';
+                browseBtn = `<button class="btn btn-secondary btn-sm" style="font-size: 10px; padding: 4px 8px; white-space: nowrap;" onclick="openBrowse(${idx}, ${ki}, '${browseMode}')">Browse</button>`;
+                // Shorten value field
+                valueField = `<input type="text" class="kv-value" style="flex: 1;" placeholder="${escHtml(placeholder)}" value="${escHtml(kv.value || '')}">`;
+            }
             kvHtml += `
                 <div class="kv-pair" data-kv-index="${ki}" style="position: relative;">
                     ${mandatoryIcon}
                     <input type="text" class="kv-key" placeholder="Key" value="${escHtml(kv.key || '')}">
                     ${valueField}
+                    ${browseBtn}
                     <button class="kv-remove" onclick="removeKV(${idx}, ${ki})">×</button>
                 </div>
             `;
@@ -1141,6 +1150,127 @@ async function autoParams(stepIdx) {
         alert('Error detecting parameters: ' + err.message);
     }
 }
+
+// ===== STORAGE BROWSE (for filecheck steps) =====
+let browseState = { stepIdx: null, kvIdx: null, mode: null, filecheck: null, container: null, prefix: '' };
+
+function openBrowse(stepIdx, kvIdx, mode) {
+    readLadderState();
+    const step = currentWorkflow.steps[stepIdx];
+    if (!step || !step.filecheck) return;
+
+    browseState = { stepIdx, kvIdx, mode, filecheck: step.filecheck, container: null, prefix: '' };
+    document.getElementById('browse-modal').style.display = 'flex';
+    document.getElementById('browse-select-btn').disabled = true;
+    document.getElementById('browse-list').innerHTML = '';
+
+    if (mode === 'container') {
+        loadContainerList();
+    } else {
+        // For folder browsing, read the current container value from the step
+        const containerParam = step.params.find(p => p.key === 'container');
+        if (!containerParam || !containerParam.value) {
+            alert('Please set the container first before browsing folders.');
+            document.getElementById('browse-modal').style.display = 'none';
+            return;
+        }
+        browseState.container = containerParam.value;
+        loadFolderList('');
+    }
+}
+
+async function loadContainerList() {
+    const listEl = document.getElementById('browse-list');
+    const loadEl = document.getElementById('browse-loading');
+    const crumbEl = document.getElementById('browse-breadcrumb');
+    crumbEl.textContent = `${browseState.filecheck} / containers`;
+    loadEl.style.display = 'block';
+    listEl.innerHTML = '';
+
+    try {
+        const r = await fetch(`/api/filechecks/${encodeURIComponent(browseState.filecheck)}/containers`);
+        const data = await r.json();
+        loadEl.style.display = 'none';
+        if (!data.success) { listEl.innerHTML = `<div style="padding: 12px; color: #e53e3e;">${escHtml(data.message)}</div>`; return; }
+        if (!data.containers || data.containers.length === 0) {
+            listEl.innerHTML = '<div style="padding: 12px; color: var(--text-secondary);">(no containers found)</div>';
+            return;
+        }
+        listEl.innerHTML = data.containers.map(c => `
+            <div class="browse-item" data-value="${escHtml(c.name)}" onclick="selectBrowseItem(this)">
+                <span style="margin-right: 8px;">📦</span> ${escHtml(c.name)}
+            </div>
+        `).join('');
+    } catch (err) {
+        loadEl.style.display = 'none';
+        listEl.innerHTML = `<div style="padding: 12px; color: #e53e3e;">Error: ${escHtml(err.message)}</div>`;
+    }
+}
+
+async function loadFolderList(prefix) {
+    browseState.prefix = prefix;
+    const listEl = document.getElementById('browse-list');
+    const loadEl = document.getElementById('browse-loading');
+    const crumbEl = document.getElementById('browse-breadcrumb');
+    crumbEl.textContent = `${browseState.filecheck} / ${browseState.container} / ${prefix || '(root)'}`;
+    loadEl.style.display = 'block';
+    listEl.innerHTML = '';
+    document.getElementById('browse-select-btn').disabled = true;
+
+    try {
+        let url = `/api/filechecks/${encodeURIComponent(browseState.filecheck)}/browse?container=${encodeURIComponent(browseState.container)}`;
+        if (prefix) url += `&prefix=${encodeURIComponent(prefix)}`;
+        const r = await fetch(url);
+        const data = await r.json();
+        loadEl.style.display = 'none';
+        if (!data.success) { listEl.innerHTML = `<div style="padding: 12px; color: #e53e3e;">${escHtml(data.message)}</div>`; return; }
+
+        let html = '';
+        // Back button if we're in a subfolder
+        if (prefix) {
+            const parent = prefix.replace(/[^/]+\/$/, '');
+            html += `<div class="browse-item browse-folder" onclick="loadFolderList('${escHtml(parent)}')"><span style="margin-right: 8px;">⬆️</span> ..</div>`;
+        }
+        // Select current folder
+        html += `<div class="browse-item browse-current" data-value="${escHtml(prefix)}" onclick="selectBrowseItem(this)"><span style="margin-right: 8px;">📁</span> <em>(select this folder)</em></div>`;
+        // Subfolders
+        data.folders.forEach(f => {
+            html += `<div class="browse-item browse-folder" onclick="loadFolderList('${escHtml(f.prefix)}')"><span style="margin-right: 8px;">📁</span> ${escHtml(f.name)}/</div>`;
+        });
+        // Files (display only, not selectable for folderPath)
+        data.files.forEach(f => {
+            const sizeKb = (f.size / 1024).toFixed(1);
+            html += `<div class="browse-item browse-file" style="color: var(--text-secondary);"><span style="margin-right: 8px;">📄</span> ${escHtml(f.name)} <span style="margin-left: auto; font-size: 11px;">${sizeKb} KB</span></div>`;
+        });
+        if (data.folders.length === 0 && data.files.length === 0 && !prefix) {
+            html += '<div style="padding: 12px; color: var(--text-secondary);">(empty container)</div>';
+        }
+        listEl.innerHTML = html;
+    } catch (err) {
+        loadEl.style.display = 'none';
+        listEl.innerHTML = `<div style="padding: 12px; color: #e53e3e;">Error: ${escHtml(err.message)}</div>`;
+    }
+}
+
+function selectBrowseItem(el) {
+    document.querySelectorAll('#browse-list .browse-item').forEach(i => i.classList.remove('browse-selected'));
+    el.classList.add('browse-selected');
+    document.getElementById('browse-select-btn').disabled = false;
+}
+
+document.getElementById('browse-select-btn').addEventListener('click', () => {
+    const selected = document.querySelector('#browse-list .browse-selected');
+    if (!selected) return;
+    const value = selected.dataset.value;
+    readLadderState();
+    currentWorkflow.steps[browseState.stepIdx].params[browseState.kvIdx].value = value;
+    renderLadder();
+    document.getElementById('browse-modal').style.display = 'none';
+});
+
+document.getElementById('close-browse-modal').addEventListener('click', () => {
+    document.getElementById('browse-modal').style.display = 'none';
+});
 
 function addBreakpoint(stepIdx) {
     readLadderState();
