@@ -4,12 +4,15 @@ param(
     [Parameter(Mandatory)] [string]$Name
 )
 
-# Engine log helper (same file as Server.ps1 writes to)
-$script:EngineLogFile = Join-Path ([System.IO.Path]::GetTempPath()) 'nexus-engine.log'
+# Engine log helper (daily rotation — matches Server.ps1 pattern)
+function Get-EngineLogFile {
+    return Join-Path ([System.IO.Path]::GetTempPath()) "nexus-engine-$(Get-Date -Format 'yyyy-MM-dd').log"
+}
 function Write-EngineLog {
     param([string]$Message, [string]$Level = 'INFO')
+    $logFile = Get-EngineLogFile
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$Level] $Message`n"
-    try { [System.IO.File]::AppendAllText($script:EngineLogFile, $line, [System.Text.Encoding]::UTF8) } catch { }
+    try { [System.IO.File]::AppendAllText($logFile, $line, [System.Text.Encoding]::UTF8) } catch { }
 }
 
 $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss')

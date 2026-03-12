@@ -99,18 +99,24 @@ Start-PodeServer -Threads 4 {
     }
 
     # ===== ENGINE LOG =====
-    # Thread-safe append-only log for internal workflow engine events
-    $engineLogFile = Join-Path ([System.IO.Path]::GetTempPath()) 'nexus-engine.log'
-    [System.IO.File]::WriteAllText($engineLogFile, "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [ENGINE] Nexus server started`n", [System.Text.Encoding]::UTF8)
-    Set-PodeState -Name 'EngineLogFile' -Value $engineLogFile | Out-Null
+    # Thread-safe append-only log with daily rotation (nexus-engine-YYYY-MM-DD.log)
+    $engineLogDir = [System.IO.Path]::GetTempPath()
+    Set-PodeState -Name 'EngineLogDir' -Value $engineLogDir | Out-Null
+
+    function Get-EngineLogFile {
+        $dir = Get-PodeState -Name 'EngineLogDir'
+        if (-not $dir) { $dir = [System.IO.Path]::GetTempPath() }
+        return Join-Path $dir "nexus-engine-$(Get-Date -Format 'yyyy-MM-dd').log"
+    }
 
     function Write-EngineLog {
         param([string]$Message, [string]$Level = 'INFO')
-        $logFile = Get-PodeState -Name 'EngineLogFile'
-        if (-not $logFile) { $logFile = Join-Path ([System.IO.Path]::GetTempPath()) 'nexus-engine.log' }
+        $logFile = Get-EngineLogFile
         $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$Level] $Message`n"
         try { [System.IO.File]::AppendAllText($logFile, $line, [System.Text.Encoding]::UTF8) } catch { }
     }
+
+    Write-EngineLog "Nexus server started" "ENGINE"
 
     function Remove-Blob {
         param([string]$Container, [string]$BlobPath)
@@ -824,14 +830,36 @@ Start-PodeServer -Threads 4 {
     }
 
     # Engine log viewer — returns last N lines
+    # List available engine log files
+    Add-PodeRoute -Method Get -Path '/api/engine-logs' -ScriptBlock {
+        $dir = Get-PodeState -Name 'EngineLogDir'
+        if (-not $dir) { $dir = [System.IO.Path]::GetTempPath() }
+        $files = Get-ChildItem -Path $dir -Filter 'nexus-engine-*.log' -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object {
+                $datePart = $_.BaseName -replace '^nexus-engine-', ''
+                @{ date = $datePart; size = $_.Length }
+            }
+        Write-PodeJsonResponse -Value @{ success = $true; logs = @($files) }
+    }
+
+    # Read a specific engine log by date (defaults to today)
     Add-PodeRoute -Method Get -Path '/api/engine-log' -ScriptBlock {
-        $lines = [int]($WebEvent.Query['lines'] ?? '200')
-        $logFile = Get-PodeState -Name 'EngineLogFile'
-        if ($logFile -and (Test-Path $logFile)) {
-            $content = Get-Content -Path $logFile -Tail $lines -ErrorAction SilentlyContinue
-            Write-PodeJsonResponse -Value @{ success = $true; log = ($content -join "`n") }
+        $date = $WebEvent.Query['date']
+        if (-not $date) { $date = Get-Date -Format 'yyyy-MM-dd' }
+        # Sanitize: only allow YYYY-MM-DD format
+        if ($date -notmatch '^\d{4}-\d{2}-\d{2}$') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Invalid date format' } -StatusCode 400
+            return
+        }
+        $dir = Get-PodeState -Name 'EngineLogDir'
+        if (-not $dir) { $dir = [System.IO.Path]::GetTempPath() }
+        $logFile = Join-Path $dir "nexus-engine-$date.log"
+        if (Test-Path $logFile) {
+            $content = Get-Content -Path $logFile -Raw -ErrorAction SilentlyContinue
+            Write-PodeJsonResponse -Value @{ success = $true; log = ($content ?? '') }
         } else {
-            Write-PodeJsonResponse -Value @{ success = $true; log = '(no engine log found)' }
+            Write-PodeJsonResponse -Value @{ success = $true; log = "(no log for $date)" }
         }
     }
 

@@ -1338,21 +1338,64 @@ document.getElementById('live-console-backdrop').addEventListener('click', () =>
 });
 
 // Engine Log viewer
-document.getElementById('engine-log-btn').addEventListener('click', async () => {
-    const modal = document.getElementById('preview-modal');
-    document.getElementById('preview-modal-title').textContent = 'Engine Log';
-    const contentEl = document.getElementById('preview-modal-content');
-    contentEl.textContent = 'Loading...';
-    contentEl.style.whiteSpace = 'pre';
-    modal.style.display = 'flex';
+// Engine Log — sidebar button opens panel, daily log selection
+document.getElementById('engine-log-btn').addEventListener('click', () => {
+    // Deactivate all nav links and panels, activate engine-log panel
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('engine-log-panel').classList.add('active');
+    loadEngineLogList();
+});
+
+async function loadEngineLogList() {
+    const sel = document.getElementById('engine-log-select');
+    sel.innerHTML = '<option value="">Loading...</option>';
     try {
-        const r = await fetch('/api/engine-log?lines=300');
+        const r = await fetch('/api/engine-logs');
         const data = await r.json();
-        contentEl.textContent = data.log || '(empty)';
-        contentEl.scrollTop = contentEl.scrollHeight;
+        sel.innerHTML = '';
+        if (data.logs && data.logs.length > 0) {
+            data.logs.forEach((log, i) => {
+                const opt = document.createElement('option');
+                opt.value = log.date;
+                const sizeKb = (log.size / 1024).toFixed(1);
+                opt.textContent = `${log.date}  (${sizeKb} KB)`;
+                sel.appendChild(opt);
+            });
+            // Auto-load the first (most recent) log
+            loadEngineLog(data.logs[0].date);
+        } else {
+            sel.innerHTML = '<option value="">(no logs available)</option>';
+            document.getElementById('engine-log-content').textContent = '(no engine logs found)';
+        }
     } catch (err) {
-        contentEl.textContent = 'Failed to load engine log: ' + err.message;
+        sel.innerHTML = '<option value="">(failed to load list)</option>';
+        document.getElementById('engine-log-content').textContent = 'Error: ' + err.message;
     }
+}
+
+async function loadEngineLog(date) {
+    const el = document.getElementById('engine-log-content');
+    el.textContent = 'Loading...';
+    try {
+        const r = await fetch('/api/engine-log?date=' + encodeURIComponent(date));
+        const data = await r.json();
+        el.textContent = data.log || '(empty)';
+        el.scrollTop = el.scrollHeight;
+    } catch (err) {
+        el.textContent = 'Failed to load log: ' + err.message;
+    }
+}
+
+document.getElementById('engine-log-load-btn').addEventListener('click', () => {
+    const date = document.getElementById('engine-log-select').value;
+    if (date) loadEngineLog(date);
+});
+
+document.getElementById('engine-log-refresh-btn').addEventListener('click', () => {
+    const date = document.getElementById('engine-log-select').value;
+    if (date) loadEngineLog(date);
+    else loadEngineLogList();
 });
 
 // Schedules

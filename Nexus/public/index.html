@@ -53,6 +53,7 @@
                 </a></li>
             </ul>
             <div class="sidebar-footer">
+                <button type="button" id="engine-log-btn" style="display: block; width: 100%; padding: 8px 0; margin-bottom: 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; color: #cbd5e0; font-size: 11px; font-weight: 500; cursor: pointer; letter-spacing: 0.2px; transition: background 0.15s;">Engine Log</button>
                 <p id="server-time" style="margin-bottom: 4px;"></p>
                 <p id="app-version">Version <span id="version-number">loading...</span></p>
             </div>
@@ -317,7 +318,6 @@
                             <option value="">-- Select a workflow --</option>
                         </select>
                         <button type="button" id="run-workflow-btn" class="btn btn-primary">Run Now</button>
-                        <button type="button" id="engine-log-btn" class="btn btn-secondary btn-sm" style="margin-left: auto;">Engine Log</button>
                     </div>
 
                     <!-- Schedules -->
@@ -486,6 +486,24 @@
                             <button type="button" id="prepare-containers-btn" class="btn btn-secondary">Prepare Containers</button>
                         </div>
                     </form>
+                </div>
+            </div>
+
+            <!-- ===== ENGINE LOG PANEL ===== -->
+            <div id="engine-log-panel" class="panel">
+                <div class="panel-header">
+                    <h1>Engine Log</h1>
+                    <p>Internal workflow engine events — daily rotation</p>
+                </div>
+                <div class="panel-body">
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 16px;">
+                        <select id="engine-log-select" style="flex: 1;">
+                            <option value="">Loading...</option>
+                        </select>
+                        <button type="button" id="engine-log-load-btn" class="btn btn-secondary btn-sm">Load</button>
+                        <button type="button" id="engine-log-refresh-btn" class="btn btn-secondary btn-sm">Refresh</button>
+                    </div>
+                    <pre id="engine-log-content" style="background: #1a1a2e; color: #e0e0e0; padding: 16px; border-radius: 6px; font-size: 12px; line-height: 1.6; overflow: auto; max-height: calc(100vh - 220px); white-space: pre-wrap; margin: 0;">(select a log and click Load)</pre>
                 </div>
             </div>
 
