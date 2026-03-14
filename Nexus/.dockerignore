@@ -1,0 +1,13 @@
+.env
+.env.example
+conf/
+*.md
+docker-compose.yml
+docker-compose.deploy.yml
+build.ps1
+publishContainer.ps1
+Deploy-Nexus.ps1
+Update-Nexus.ps1
+copyToGithub.ps1
+.git/
+.claude/
