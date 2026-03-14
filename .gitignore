@@ -1,3 +1,4 @@
 Nexus/.env
 Nexus/conf/
 Nexus/GHCR-Publish.md
+Nexus/copyToGithub.ps1
