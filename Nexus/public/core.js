@@ -19,6 +19,7 @@ document.querySelectorAll('.nav-link').forEach(link => {
         if (panelId === 'runner') { loadWorkflowDropdowns(); loadScheduleList(); }
         if (panelId === 'logs') loadWorkflowDropdowns();
         if (panelId === 'modules') { document.getElementById('modules-output').innerHTML = ''; document.getElementById('modules-empty').style.display = 'block'; }
+        if (panelId === 'sandbox') loadSandboxTerminal();
         if (panelId === 'config') loadConfig();
     });
 });
@@ -111,9 +112,16 @@ document.getElementById('prepare-containers-btn').addEventListener('click', asyn
 });
 
 // ===== SANDBOX =====
-document.getElementById('sandbox-open-btn').addEventListener('click', () => {
-    const ttydUrl = `${window.location.protocol}//${window.location.hostname}:7681`;
-    window.open(ttydUrl, '_blank');
+// Load terminal iframe when sandbox panel is activated
+function loadSandboxTerminal() {
+    const iframe = document.getElementById('sandbox-terminal');
+    if (!iframe.src || iframe.src === '' || iframe.src === window.location.href) {
+        iframe.src = '/terminal/';
+    }
+}
+
+document.getElementById('sandbox-popout-btn').addEventListener('click', () => {
+    window.open('/terminal/', '_blank', 'width=900,height=600');
 });
 
 document.getElementById('sandbox-reset-btn').addEventListener('click', async () => {

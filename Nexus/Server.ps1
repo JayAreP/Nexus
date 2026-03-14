@@ -24,18 +24,20 @@ if ($env:AZURE_CLIENT_ID -and $env:AZURE_CLIENT_SECRET -and $env:AZURE_TENANT_ID
 }
 
 ## ===== SANDBOX TERMINAL =====
-# Start ttyd as a background process for the sandbox terminal
+# Start ttyd as a background process for the sandbox terminal (localhost only, behind nginx)
 try {
     $ttydPath = '/usr/local/bin/ttyd'
     if (Test-Path $ttydPath) {
         $sandboxProc = Start-Process -FilePath $ttydPath -ArgumentList @(
             '-W',
+            '-i', '127.0.0.1',
             '-p', '7681',
+            '-b', '/terminal',
             '-t', 'fontSize=14',
             '-t', 'theme={"background":"#1a202c","foreground":"#e2e8f0"}',
             'su', '-', 'sandbox'
         ) -PassThru -NoNewWindow
-        Write-Host "Sandbox terminal started on port 7681 (PID: $($sandboxProc.Id))" -ForegroundColor Green
+        Write-Host "Sandbox terminal started on 127.0.0.1:7681 /terminal (PID: $($sandboxProc.Id))" -ForegroundColor Green
     } else {
         Write-Host "ttyd not found - sandbox terminal disabled" -ForegroundColor Yellow
     }
@@ -43,8 +45,17 @@ try {
     Write-Host "Failed to start sandbox terminal: $($_.Exception.Message)" -ForegroundColor Red
 }
 
+## ===== NGINX REVERSE PROXY =====
+# Start nginx as the single-port front door (port 8080 → PODE 8081 + ttyd 7681)
+try {
+    Start-Process -FilePath 'nginx' -NoNewWindow
+    Write-Host "nginx reverse proxy started on port 8080" -ForegroundColor Green
+} catch {
+    Write-Host "Failed to start nginx: $($_.Exception.Message)" -ForegroundColor Red
+}
+
 Start-PodeServer -Threads 4 {
-    Add-PodeEndpoint -Address 0.0.0.0 -Port 8080 -Protocol Http
+    Add-PodeEndpoint -Address 0.0.0.0 -Port 8081 -Protocol Http
     Enable-PodeSessionMiddleware -Duration 3600 -Extend
     Add-PodeStaticRoute -Path '/static' -Source './public'
     New-PodeLoggingMethod -Terminal | Enable-PodeErrorLogging
@@ -264,7 +275,7 @@ Start-PodeServer -Threads 4 {
             $proc = Get-Process -Name 'ttyd' -ErrorAction SilentlyContinue
             $ttydRunning = $null -ne $proc
         } catch { }
-        Write-PodeJsonResponse -Value @{ success = $true; running = $ttydRunning; port = 7681 }
+        Write-PodeJsonResponse -Value @{ success = $true; running = $ttydRunning; path = '/terminal/' }
     }
 
     Add-PodeRoute -Method Post -Path '/api/sandbox/reset' -ScriptBlock {
@@ -395,6 +406,24 @@ Start-PodeServer -Threads 4 {
                 return
             }
             Write-PodeJsonResponse -Value @{ success = $true; content = $content; name = $scriptName }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Update script content (from editor)
+    Add-PodeRoute -Method Put -Path '/api/scripts/:type/:name' -ScriptBlock {
+        $scriptType = $WebEvent.Parameters['type']
+        $scriptName = $WebEvent.Parameters['name']
+        $container = "nexus-$scriptType"
+        try {
+            $body = $WebEvent.Data
+            if (-not $body.content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = 'No content provided' } -StatusCode 400
+                return
+            }
+            Write-Blob -Container $container -BlobPath $scriptName -Content $body.content
+            Write-PodeJsonResponse -Value @{ success = $true; message = "Script '$scriptName' saved" }
         } catch {
             Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
         }

@@ -457,15 +457,16 @@
             <div id="sandbox-panel" class="panel">
                 <div class="panel-header">
                     <h1>Sandbox</h1>
-                    <p>Restricted test environment &mdash; run pwsh, python, terraform and more</p>
+                    <p>Restricted test environment &mdash; pwsh, python3, terraform, az, aws, gcloud, bash</p>
                 </div>
                 <div class="panel-body">
                     <div id="sandbox-message" class="message"></div>
-                    <p style="margin-bottom:16px; color:#4a5568;">The sandbox opens a web terminal as the restricted <code>sandbox</code> user. Working directory: <code>/home/sandbox/workspace</code>. Available tools: pwsh, python3, terraform, bash, and installed modules (including NLS).</p>
-                    <div class="form-actions">
-                        <button class="btn btn-primary" id="sandbox-open-btn">Open Sandbox Terminal</button>
-                        <button class="btn btn-secondary" id="sandbox-reset-btn">Reset Sandbox</button>
+                    <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+                        <button class="btn btn-secondary btn-sm" id="sandbox-reset-btn">Reset Workspace</button>
+                        <button class="btn btn-secondary btn-sm" id="sandbox-popout-btn">Pop Out</button>
+                        <span style="font-size:11px; color:var(--text-secondary);">Working directory: /home/sandbox/workspace</span>
                     </div>
+                    <iframe id="sandbox-terminal" src=""></iframe>
                 </div>
             </div>
 
@@ -578,6 +579,24 @@
         </div>
     </div>
 
+    <!-- Script Editor Modal -->
+    <div id="editor-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 90vw; width: 90vw;">
+            <div class="modal-header">
+                <h2 id="editor-modal-title">Edit Script</h2>
+                <button class="modal-close" id="close-editor-modal">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 0;">
+                <div id="editor-container" style="height: 60vh; width: 100%;"></div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px; padding:12px 16px; border-top:1px solid #e2e8f0;">
+                <span id="editor-status" style="flex:1; font-size:12px; color:var(--text-secondary); line-height:32px;"></span>
+                <button class="btn btn-secondary" id="editor-cancel-btn">Cancel</button>
+                <button class="btn btn-primary" id="editor-save-btn">Save</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Storage Browse Modal -->
     <div id="browse-modal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 650px;">
@@ -659,6 +678,7 @@
     </div>
     <div id="live-console-backdrop" class="live-console-backdrop"></div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.6/ace.min.js"></script>
     <script src="/static/core.js"></script>
     <script src="/static/scripts.js"></script>
     <script src="/static/webhooks.js"></script>

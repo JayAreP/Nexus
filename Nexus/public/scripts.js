@@ -138,6 +138,7 @@ async function loadScripts() {
                 item.innerHTML = `
                     <span class="script-item-name">${s.name}</span>
                     <div style="display: flex; gap: 6px;">
+                        <button class="btn btn-secondary btn-sm" onclick="editScript('${currentScriptType}', '${s.name}')">Edit</button>
                         <button class="btn btn-secondary btn-sm" onclick="previewScript('${currentScriptType}', '${s.name}')">Preview</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteScript('${currentScriptType}', '${s.name}')">Delete</button>
                     </div>
@@ -183,6 +184,84 @@ async function previewScript(type, name) {
         contentEl.innerHTML = `<p style="color: var(--error-color);">Error: ${escHtml(err.message)}</p>`;
     }
 }
+
+// ===== SCRIPT EDITOR =====
+const aceModeMap = { powershell: 'powershell', python: 'python', shell: 'sh', terraform: 'terraform', webhook: 'json', filecheck: 'json' };
+let aceEditor = null;
+let editorScriptType = '';
+let editorScriptName = '';
+
+async function editScript(type, name) {
+    editorScriptType = type;
+    editorScriptName = name;
+    document.getElementById('editor-modal-title').textContent = name;
+    document.getElementById('editor-status').textContent = 'Loading...';
+    document.getElementById('editor-modal').style.display = 'flex';
+
+    // Init or reuse Ace editor
+    if (!aceEditor) {
+        aceEditor = ace.edit('editor-container', {
+            fontSize: 13,
+            theme: 'ace/theme/monokai',
+            showPrintMargin: false,
+            wrap: true,
+            tabSize: 4,
+            useSoftTabs: true
+        });
+    }
+    aceEditor.setValue('');
+    aceEditor.setReadOnly(true);
+
+    try {
+        const r = await fetch(`/api/scripts/${encodeURIComponent(type)}/${encodeURIComponent(name)}/content`);
+        const data = await r.json();
+        if (data.success) {
+            const mode = aceModeMap[type] || 'text';
+            aceEditor.session.setMode('ace/mode/' + mode);
+            aceEditor.setValue(data.content, -1);
+            aceEditor.setReadOnly(false);
+            aceEditor.focus();
+            document.getElementById('editor-status').textContent = '';
+        } else {
+            document.getElementById('editor-status').textContent = data.message || 'Failed to load';
+        }
+    } catch (err) {
+        document.getElementById('editor-status').textContent = 'Error: ' + err.message;
+    }
+}
+
+document.getElementById('editor-save-btn').addEventListener('click', async () => {
+    const content = aceEditor.getValue();
+    const statusEl = document.getElementById('editor-status');
+    statusEl.textContent = 'Saving...';
+    try {
+        const r = await fetch(`/api/scripts/${encodeURIComponent(editorScriptType)}/${encodeURIComponent(editorScriptName)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        const data = await r.json();
+        if (data.success) {
+            statusEl.textContent = 'Saved.';
+            setTimeout(() => {
+                document.getElementById('editor-modal').style.display = 'none';
+                showMessage('scripts-message', 'success', `Script "${editorScriptName}" saved.`);
+            }, 500);
+        } else {
+            statusEl.textContent = 'Save failed: ' + (data.message || 'Unknown error');
+        }
+    } catch (err) {
+        statusEl.textContent = 'Save error: ' + err.message;
+    }
+});
+
+document.getElementById('editor-cancel-btn').addEventListener('click', () => {
+    document.getElementById('editor-modal').style.display = 'none';
+});
+
+document.getElementById('close-editor-modal').addEventListener('click', () => {
+    document.getElementById('editor-modal').style.display = 'none';
+});
 
 // Upload handling
 const uploadArea = document.getElementById('upload-area');

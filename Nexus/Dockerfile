@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     gnupg \
     lsb-release \
+    nginx \
     software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
@@ -60,6 +61,10 @@ COPY Scripts/ /app/Scripts/
 COPY public/ /app/public/
 COPY version.txt /app/
 
+# Configure nginx as reverse proxy (single-port entry point)
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/sites-enabled/default
+
 # Install NLS modules for workflow scripts
 COPY NLS/powershell/NLS/ /opt/microsoft/powershell/7-lts/Modules/NLS/1.0.0/
 COPY NLS/python/ /tmp/nls-pkg/
@@ -84,7 +89,6 @@ RUN echo 'export PS1="\[\e[33m\]sandbox\[\e[0m\]:\[\e[36m\]\w\[\e[0m\]$ "' > /ho
     && chown sandbox:sandbox /home/sandbox/.bashrc
 
 EXPOSE 8080
-EXPOSE 7681
 
 ENV POWERSHELL_TELEMETRY_OPTOUT=1
 

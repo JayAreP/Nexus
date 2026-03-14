@@ -1,12 +1,18 @@
+# Nexus - Deployment Compose (for pulling from GitHub Container Registry)
+# Usage:
+#   1. Copy this file and .env.example to your deployment host
+#   2. Rename .env.example to .env and fill in your values
+#   3. Create a ./conf directory for persistent config
+#   4. Run: docker compose -f docker-compose.deploy.yml up -d
+
 services:
   nexus-web:
-    build: .
+    image: ghcr.io/jayarep/nexus:latest
     container_name: nexus-app
     ports:
-      - "8082:8080"
+      - "8080:8080"
     volumes:
       - ./conf:/app/conf
-      - ./Scripts:/app/Scripts:ro
       - nexus-ps-modules:/usr/local/share/powershell/Modules
       - nexus-py-packages:/usr/local/lib/python3.10/dist-packages
     environment:

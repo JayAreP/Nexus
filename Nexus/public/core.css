@@ -131,6 +131,35 @@ body {
     display: block;
 }
 
+#sandbox-panel.active {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 48px);
+}
+
+#sandbox-panel .panel-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    padding: 0 16px 16px;
+    overflow: hidden;
+    min-height: 0;
+}
+
+#sandbox-panel .panel-header {
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+#sandbox-terminal {
+    flex: 1;
+    width: 100%;
+    border: 1px solid #2d3748;
+    border-radius: 4px;
+    background: #1a202c;
+    min-height: 0;
+}
+
 .panel-header {
     margin-bottom: 32px;
 }
