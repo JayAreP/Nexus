@@ -2,3 +2,7 @@ Nexus/.env
 Nexus/conf/
 Nexus/GHCR-Publish.md
 Nexus/copyToGithub.ps1
+Nexus/build.ps1
+Nexus/publishContainer.ps1
+Nexus/Deploy-Nexus.ps1
+Nexus/Update-Nexus.ps1
