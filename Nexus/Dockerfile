@@ -13,8 +13,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     gnupg \
+    lsb-release \
     software-properties-common \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Azure CLI
+RUN curl -sLS https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ $(lsb_release -cs) main" \
+       | tee /etc/apt/sources.list.d/azure-cli.list \
+    && apt-get update && apt-get install -y azure-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Google Cloud CLI
+RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+       | tee /etc/apt/sources.list.d/google-cloud-sdk.list \
+    && apt-get update && apt-get install -y google-cloud-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install AWS CLI v2
+RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip \
+    && unzip /tmp/awscliv2.zip -d /tmp/aws-installer \
+    && /tmp/aws-installer/aws/install \
+    && rm -rf /tmp/awscliv2.zip /tmp/aws-installer \
+    && aws --version
 
 # Install ttyd (web terminal)
 RUN curl -fsSL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -o /usr/local/bin/ttyd \
@@ -57,7 +79,7 @@ RUN echo 'export PS1="\[\e[33m\]sandbox\[\e[0m\]:\[\e[36m\]\w\[\e[0m\]$ "' > /ho
     && echo 'echo ""' >> /home/sandbox/.bashrc \
     && echo 'echo "  Nexus Sandbox - Restricted Test Environment"' >> /home/sandbox/.bashrc \
     && echo 'echo "  Working directory: /home/sandbox/workspace"' >> /home/sandbox/.bashrc \
-    && echo 'echo "  Available: pwsh, python3, terraform, bash"' >> /home/sandbox/.bashrc \
+    && echo 'echo "  Available: pwsh, python3, terraform, az, aws, gcloud, bash"' >> /home/sandbox/.bashrc \
     && echo 'echo ""' >> /home/sandbox/.bashrc \
     && chown sandbox:sandbox /home/sandbox/.bashrc
 

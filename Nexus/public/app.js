@@ -546,6 +546,7 @@ async function loadCredentialList() {
                         ${cred.description ? `<span style="font-size: 11px; color: var(--text-secondary); margin-left: 8px;">— ${escHtml(cred.description)}</span>` : ''}
                     </div>
                     <div style="display: flex; gap: 6px;">
+                        <button class="btn btn-secondary btn-sm" onclick="showCredentialHelp('${escHtml(cred.name)}', '${escHtml(cred.type)}')">Help</button>
                         <button class="btn btn-secondary btn-sm" onclick="editCredential('${escHtml(cred.name)}')">Edit</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteCredential('${escHtml(cred.name)}')">Delete</button>
                     </div>
@@ -570,6 +571,175 @@ async function deleteCredential(name) {
     } catch (err) {
         showMessage('credentials-message', 'error', 'Error: ' + err.message);
     }
+}
+
+function showCredentialHelp(name, type) {
+    const modal = document.getElementById('preview-modal');
+    document.getElementById('preview-modal-title').textContent = `Using Credential: ${name}`;
+    const contentEl = document.getElementById('preview-modal-content');
+
+    const psVar = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name) ? '$' + name : '${' + name + '}';
+    const pyVar = name.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\d)/, '_$1');
+    const typeLabel = credentialTypes[type] ? credentialTypes[type].label : type;
+
+    const sections = buildCredentialHelpSections(name, type, psVar, pyVar);
+
+    let html = '<div style="font-size: 13px; line-height: 1.7; color: var(--text-primary); padding: 4px;">';
+    html += `<p style="margin: 0 0 12px 0; color: var(--text-secondary);">Usage examples for <strong>${escHtml(name)}</strong> (${escHtml(typeLabel)}). Copy these snippets directly into your scripts.</p>`;
+    sections.forEach(s => {
+        html += `<h3 style="margin: 16px 0 8px 0; font-size: 15px;">${escHtml(s.title)}</h3>`;
+        html += `<pre style="background: #1a202c; color: #e2e8f0; padding: 12px; overflow-x: auto; white-space: pre-wrap; font-size: 12px; margin: 0 0 6px 0;"><code>${escHtml(s.code)}</code></pre>`;
+    });
+    html += '</div>';
+
+    contentEl.innerHTML = html;
+    modal.style.display = 'flex';
+}
+
+function buildCredentialHelpSections(name, type, ps, py) {
+    const sections = [];
+    let psCode = 'Import-Module NLS\n';
+    let pyCode = 'import nls\n';
+    let nativeTitle = null;
+    let nativeCode = null;
+
+    switch (type) {
+        case 'usernamepassword':
+            psCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            psCode += `$cred = New-Object PSCredential ${ps}.username, (ConvertTo-SecureString ${ps}.password -AsPlainText -Force)`;
+            pyCode += `${py} = nls.get_credential("${name}")\n`;
+            pyCode += `username = ${py}["username"]\n`;
+            pyCode += `password = ${py}["password"]  # decrypted`;
+            break;
+
+        case 'azureserviceprincipal':
+            psCode += 'Import-Module Az.Accounts\n';
+            psCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            psCode += `$secPwd = ConvertTo-SecureString ${ps}.clientSecret -AsPlainText -Force\n`;
+            psCode += `$psCred = [PSCredential]::new(${ps}.clientId, $secPwd)\n`;
+            psCode += `Connect-AzAccount -ServicePrincipal -Tenant ${ps}.tenantId -Credential $psCred`;
+            pyCode += 'from azure.identity import ClientSecretCredential\n\n';
+            pyCode += `${py} = nls.get_credential("${name}")\n`;
+            pyCode += `credential = ClientSecretCredential(\n`;
+            pyCode += `    tenant_id=${py}["tenantId"],\n`;
+            pyCode += `    client_id=${py}["clientId"],\n`;
+            pyCode += `    client_secret=${py}["clientSecret"],\n`;
+            pyCode += `)`;
+            nativeTitle = 'Azure CLI';
+            nativeCode = `Import-Module NLS\n`;
+            nativeCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            nativeCode += `az login --service-principal -u ${ps}.clientId -p ${ps}.clientSecret --tenant ${ps}.tenantId`;
+            break;
+
+        case 'apikey':
+            psCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            psCode += `$headers = @{ ${ps}.headerName = ${ps}.key }\n`;
+            psCode += `Invoke-RestMethod -Uri 'https://api.example.com/endpoint' -Headers $headers`;
+            pyCode += 'import requests\n\n';
+            pyCode += `${py} = nls.get_credential("${name}")\n`;
+            pyCode += `headers = {${py}["headerName"]: ${py}["key"]}\n`;
+            pyCode += `response = requests.get("https://api.example.com/endpoint", headers=headers)`;
+            break;
+
+        case 'oauth2':
+            psCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            psCode += `$body = @{\n`;
+            psCode += `    grant_type    = 'client_credentials'\n`;
+            psCode += `    client_id     = ${ps}.clientId\n`;
+            psCode += `    client_secret = ${ps}.clientSecret\n`;
+            psCode += `    scope         = ${ps}.scope\n`;
+            psCode += `}\n`;
+            psCode += `$token = Invoke-RestMethod -Method Post -Uri ${ps}.tokenUrl -Body $body\n`;
+            psCode += `$headers = @{ Authorization = "Bearer $($token.access_token)" }`;
+            pyCode += 'import requests\n\n';
+            pyCode += `${py} = nls.get_credential("${name}")\n`;
+            pyCode += `token_resp = requests.post(${py}["tokenUrl"], data={\n`;
+            pyCode += `    "grant_type": "client_credentials",\n`;
+            pyCode += `    "client_id": ${py}["clientId"],\n`;
+            pyCode += `    "client_secret": ${py}["clientSecret"],\n`;
+            pyCode += `    "scope": ${py}["scope"],\n`;
+            pyCode += `})\n`;
+            pyCode += `access_token = token_resp.json()["access_token"]`;
+            break;
+
+        case 'aws':
+            psCode += 'Import-Module AWSPowerShell.NetCore\n';
+            psCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            psCode += `Set-AWSCredential -AccessKey ${ps}.accessKeyId -SecretKey ${ps}.secretAccessKey -SessionToken ${ps}.sessionToken\n`;
+            psCode += `Set-DefaultAWSRegion -Region ${ps}.region`;
+            pyCode += 'import boto3\n\n';
+            pyCode += `${py} = nls.get_credential("${name}")\n`;
+            pyCode += `session = boto3.Session(\n`;
+            pyCode += `    aws_access_key_id=${py}["accessKeyId"],\n`;
+            pyCode += `    aws_secret_access_key=${py}["secretAccessKey"],\n`;
+            pyCode += `    aws_session_token=${py}.get("sessionToken"),\n`;
+            pyCode += `    region_name=${py}.get("region", "us-east-1"),\n`;
+            pyCode += `)`;
+            nativeTitle = 'AWS CLI';
+            nativeCode = `Import-Module NLS\n`;
+            nativeCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            nativeCode += `$env:AWS_ACCESS_KEY_ID = ${ps}.accessKeyId\n`;
+            nativeCode += `$env:AWS_SECRET_ACCESS_KEY = ${ps}.secretAccessKey\n`;
+            nativeCode += `$env:AWS_SESSION_TOKEN = ${ps}.sessionToken\n`;
+            nativeCode += `$env:AWS_DEFAULT_REGION = ${ps}.region\n\n`;
+            nativeCode += `# AWS CLI commands will now use these credentials\naws sts get-caller-identity`;
+            break;
+
+        case 'gcp':
+            psCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            psCode += `${ps}.privateKey | Set-Content /tmp/gcp-key.json\n`;
+            psCode += `gcloud auth activate-service-account ${ps}.clientEmail \`\n`;
+            psCode += `    --key-file=/tmp/gcp-key.json --project=${ps}.projectId`;
+            pyCode += 'import json\nfrom google.oauth2 import service_account\n\n';
+            pyCode += `${py} = nls.get_credential("${name}")\n`;
+            pyCode += `key_data = json.loads(${py}["privateKey"])\n`;
+            pyCode += `credentials = service_account.Credentials.from_service_account_info(key_data)`;
+            nativeTitle = 'gcloud CLI';
+            nativeCode = `Import-Module NLS\n`;
+            nativeCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            nativeCode += `${ps}.privateKey | Set-Content /tmp/gcp-key.json\n`;
+            nativeCode += `gcloud auth activate-service-account ${ps}.clientEmail \`\n`;
+            nativeCode += `    --key-file=/tmp/gcp-key.json --project=${ps}.projectId`;
+            break;
+
+        case 'connectionstring':
+            psCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            psCode += `$connStr = ${ps}.connectionString\n\n`;
+            psCode += `# Example: SQL Server\n`;
+            psCode += `$conn = New-Object System.Data.SqlClient.SqlConnection($connStr)`;
+            pyCode += `${py} = nls.get_credential("${name}")\n`;
+            pyCode += `conn_str = ${py}["connectionString"]\n\n`;
+            pyCode += `# Example: pyodbc\nimport pyodbc\nconn = pyodbc.connect(conn_str)`;
+            break;
+
+        case 'token':
+            psCode += `${ps} = Get-NLSCredential -Name '${name}'\n`;
+            psCode += `$headers = @{ Authorization = "Bearer $(${ps}.token)" }\n`;
+            psCode += `Invoke-RestMethod -Uri 'https://api.example.com/endpoint' -Headers $headers`;
+            pyCode += 'import requests\n\n';
+            pyCode += `${py} = nls.get_credential("${name}")\n`;
+            pyCode += `headers = {"Authorization": f"Bearer {${py}['token']}"}\n`;
+            pyCode += `response = requests.get("https://api.example.com/endpoint", headers=headers)`;
+            break;
+
+        default:
+            psCode += `${ps} = Get-NLSCredential -Name '${name}'`;
+            pyCode += `${py} = nls.get_credential("${name}")`;
+    }
+
+    sections.push({ title: 'PowerShell', code: psCode });
+    sections.push({ title: 'Python', code: pyCode });
+    if (nativeTitle && nativeCode) {
+        sections.push({ title: nativeTitle, code: nativeCode });
+    }
+
+    let apiCode = `# PowerShell — direct REST call (no module needed)\n`;
+    apiCode += `$resp = Invoke-RestMethod -Uri 'http://localhost:8080/api/credentials/${name}/resolve'\n`;
+    apiCode += `$resp.credential.values\n\n`;
+    apiCode += `# curl\ncurl -s http://localhost:8080/api/credentials/${name}/resolve | jq '.credential.values'`;
+    sections.push({ title: 'REST API', code: apiCode });
+
+    return sections;
 }
 
 function renderCredentialFields(typeName, existingValues) {
@@ -739,7 +909,7 @@ Connect-AzAccount -ServicePrincipal -Tenant $sp.tenantId -Credential $psCred
 
 # Use with AWS
 $aws = Get-NLSCredential -Name 'aws-production'
-Set-AWSCredential -AccessKey $aws.accessKeyId -SecretKey $aws.secretAccessKey
+Set-AWSCredential -AccessKey $aws.accessKeyId -SecretKey $aws.secretAccessKey -SessionToken $aws.sessionToken
 
 # Use with GCP
 $gcp = Get-NLSCredential -Name 'gcp-project'
@@ -769,6 +939,7 @@ aws = nls.get_credential("aws-production")
 session = boto3.Session(
     aws_access_key_id=aws["accessKeyId"],
     aws_secret_access_key=aws["secretAccessKey"],
+    aws_session_token=aws.get("sessionToken"),
     region_name=aws.get("region", "us-east-1"),
 )
 
@@ -816,7 +987,7 @@ curl -s http://localhost:8080/api/credentials/prod-db-login/resolve | jq '.crede
 <tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 6px 8px;">Azure Service Principal</td><td style="padding: 6px 8px;">tenantId, clientId, <em>clientSecret</em></td></tr>
 <tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 6px 8px;">API Key</td><td style="padding: 6px 8px;">headerName, <em>key</em></td></tr>
 <tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 6px 8px;">OAuth2 Client Credentials</td><td style="padding: 6px 8px;">tokenUrl, clientId, <em>clientSecret</em>, scope</td></tr>
-<tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 6px 8px;">AWS Credentials</td><td style="padding: 6px 8px;">accessKeyId, <em>secretAccessKey</em>, region</td></tr>
+<tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 6px 8px;">AWS Credentials</td><td style="padding: 6px 8px;">accessKeyId, <em>secretAccessKey</em>, <em>sessionToken</em>, region</td></tr>
 <tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 6px 8px;">GCP Service Account</td><td style="padding: 6px 8px;">projectId, clientEmail, <em>privateKey</em></td></tr>
 <tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 6px 8px;">Connection String</td><td style="padding: 6px 8px;"><em>connectionString</em></td></tr>
 <tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 6px 8px;">Bearer Token</td><td style="padding: 6px 8px;"><em>token</em></td></tr>
@@ -1237,14 +1408,14 @@ async function loadFolderList(prefix) {
         data.folders.forEach(f => {
             html += `<div class="browse-item browse-folder" onclick="loadFolderList('${escHtml(f.prefix)}')"><span style="margin-right: 8px;">📁</span> ${escHtml(f.name)}/</div>`;
         });
+        if (data.folders.length === 0) {
+            html += `<div style="padding: 8px 12px; color: var(--text-secondary); font-style: italic;">(no folders)</div>`;
+        }
         // Files (display only, not selectable for folderPath)
         data.files.forEach(f => {
             const sizeKb = (f.size / 1024).toFixed(1);
             html += `<div class="browse-item browse-file" style="color: var(--text-secondary);"><span style="margin-right: 8px;">📄</span> ${escHtml(f.name)} <span style="margin-left: auto; font-size: 11px;">${sizeKb} KB</span></div>`;
         });
-        if (data.folders.length === 0 && data.files.length === 0 && !prefix) {
-            html += '<div style="padding: 12px; color: var(--text-secondary);">(empty container)</div>';
-        }
         listEl.innerHTML = html;
     } catch (err) {
         loadEl.style.display = 'none';
@@ -2005,6 +2176,7 @@ document.querySelectorAll('.module-tab').forEach(tab => {
         document.getElementById('modules-output').innerHTML = '';
         document.getElementById('modules-empty').style.display = 'block';
         document.getElementById('module-install-form').style.display = 'none';
+        document.getElementById('apt-warning').style.display = currentModuleType === 'apt' ? 'block' : 'none';
         clearMessage('modules-message');
     });
 });
@@ -2033,6 +2205,33 @@ document.getElementById('show-modules-btn').addEventListener('click', async () =
                 outputEl.innerHTML = html;
             } else if (currentModuleType === 'python' && data.output) {
                 outputEl.innerHTML = `<pre style="font-size: 12px; background: #1a202c; color: #e2e8f0; padding: 16px; overflow-x: auto; white-space: pre-wrap; max-height: 70vh; overflow-y: auto;">${escHtml(data.output)}</pre>`;
+            } else if (currentModuleType === 'apt' && data.packages) {
+                const missing = data.packages.filter(p => !p.installed && p.source === 'apt');
+                let html = '';
+                if (missing.length > 0) {
+                    html += '<div style="background: rgba(234,88,12,0.15); border: 1px solid #ea580c; color: #fdba74; padding: 12px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px;">';
+                    html += `<strong>${missing.length} package(s) missing after rebuild:</strong>`;
+                    html += '<div style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">';
+                    missing.forEach(p => {
+                        html += `<div style="display: flex; align-items: center; gap: 8px;">`;
+                        html += `<span style="font-weight: 500;">${escHtml(p.name)}</span>`;
+                        if (p.note) html += `<span style="font-size: 11px; opacity: 0.8;">${escHtml(p.note)}</span>`;
+                        html += `<button class="btn btn-primary btn-sm" onclick="reinstallAptPackage(this, '${escHtml(p.name)}')" style="margin-left: auto; padding: 2px 10px; font-size: 11px;">Install</button>`;
+                        html += `</div>`;
+                    });
+                    html += '</div></div>';
+                }
+                html += '<table style="width: 100%; font-size: 13px; border-collapse: collapse;">';
+                html += '<thead><tr style="border-bottom: 2px solid #e2e8f0; text-align: left;"><th style="padding: 8px 12px;">Package</th><th style="padding: 8px 12px;">Version</th><th style="padding: 8px 12px;">Source</th><th style="padding: 8px 12px;">Note</th><th style="padding: 8px 12px;">Status</th></tr></thead><tbody>';
+                data.packages.forEach(p => {
+                    const sourceStyle = p.source === 'manual' ? 'color: var(--text-secondary); font-style: italic;' : '';
+                    const statusHtml = p.installed
+                        ? '<span style="color: #48bb78;">Installed</span>'
+                        : '<span style="color: #f56565;">Missing</span>';
+                    html += `<tr style="border-bottom: 1px solid #edf2f7;"><td style="padding: 8px 12px; font-weight: 500;">${escHtml(p.name)}</td><td style="padding: 8px 12px; font-family: monospace;">${escHtml(p.installed ? (p.version || '') : '')}</td><td style="padding: 8px 12px; ${sourceStyle}">${escHtml(p.source)}</td><td style="padding: 8px 12px; color: var(--text-secondary); font-size:12px;">${escHtml(p.note || '')}</td><td style="padding: 8px 12px;">${statusHtml}</td></tr>`;
+                });
+                html += '</tbody></table>';
+                outputEl.innerHTML = html;
             } else {
                 emptyEl.style.display = 'block';
                 emptyEl.querySelector('p').textContent = 'No modules found.';
@@ -2044,7 +2243,7 @@ document.getElementById('show-modules-btn').addEventListener('click', async () =
         showMessage('modules-message', 'error', 'Error: ' + err.message);
     } finally {
         btn.disabled = false;
-        btn.textContent = 'Show Modules';
+        btn.textContent = 'Show';
     }
 });
 
@@ -2059,9 +2258,12 @@ document.getElementById('add-module-btn').addEventListener('click', () => {
     if (currentModuleType === 'powershell') {
         ghSection.style.display = 'block';
         galleryLabel.textContent = 'PowerShell Gallery';
-    } else {
+    } else if (currentModuleType === 'python') {
         ghSection.style.display = 'none';
         galleryLabel.textContent = 'PyPI (pip)';
+    } else {
+        ghSection.style.display = 'none';
+        galleryLabel.textContent = 'Package Name (apt-get)';
     }
     document.getElementById('module-name-input').focus();
 });
@@ -2111,6 +2313,32 @@ async function removeModule(name) {
         if (data.success) document.getElementById('show-modules-btn').click();
     } catch (err) {
         showMessage('modules-message', 'error', 'Error: ' + err.message);
+    }
+}
+
+async function reinstallAptPackage(btn, name) {
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Installing...';
+    try {
+        const r = await fetch('/api/modules/apt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        const data = await r.json();
+        if (data.success) {
+            showMessage('modules-message', 'success', data.message);
+            document.getElementById('show-modules-btn').click();
+        } else {
+            showMessage('modules-message', 'error', data.message);
+            btn.disabled = false;
+            btn.textContent = origText;
+        }
+    } catch (err) {
+        showMessage('modules-message', 'error', 'Error: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = origText;
     }
 }
 

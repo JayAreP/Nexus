@@ -179,6 +179,7 @@ Start-PodeServer -Threads 4 {
             fields = @(
                 @{ name = 'accessKeyId';     label = 'Access Key ID';     type = 'text';     secret = $false }
                 @{ name = 'secretAccessKey'; label = 'Secret Access Key'; type = 'password'; secret = $true  }
+                @{ name = 'sessionToken';    label = 'Session Token';     type = 'password'; secret = $true  }
                 @{ name = 'region';          label = 'Region';            type = 'text';     secret = $false }
             )
         }
@@ -1048,6 +1049,42 @@ Start-PodeServer -Threads 4 {
             } elseif ($type -eq 'python') {
                 $output = & pip3 list 2>&1 | Out-String
                 Write-PodeJsonResponse -Value @{ success = $true; output = $output }
+            } elseif ($type -eq 'apt') {
+                # Packages bundled in the container image
+                $defaults = @(
+                    @{ name='python3';          source='apt';    note='Python 3 runtime' }
+                    @{ name='python3-pip';      source='apt';    note='Python package manager' }
+                    @{ name='git';              source='apt';    note='Version control' }
+                    @{ name='curl';             source='apt';    note='HTTP client' }
+                    @{ name='unzip';            source='apt';    note='Archive extraction' }
+                    @{ name='gnupg';            source='apt';    note='GPG key management' }
+                    @{ name='azure-cli';        source='apt';    note='Azure CLI (az)' }
+                    @{ name='google-cloud-cli'; source='apt';    note='Google Cloud CLI (gcloud)' }
+                    @{ name='aws-cli-v2';       source='manual'; note='AWS CLI v2 (aws)' }
+                    @{ name='terraform';        source='manual'; note='Terraform IaC tool' }
+                )
+                # Merge with user-installed packages from file
+                $pkgFile = '/app/conf/apt-packages.json'
+                $userPkgs = if (Test-Path $pkgFile) { @(Get-Content $pkgFile -Raw | ConvertFrom-Json) } else { @() }
+                $defaultNames = $defaults | ForEach-Object { $_.name }
+                $allPackages = $defaults + @($userPkgs | Where-Object { $_.name -notin $defaultNames })
+                $result = @()
+                foreach ($pkg in $allPackages) {
+                    $ver = if ($pkg.version) { $pkg.version } else { '' }
+                    if ($pkg.source -eq 'apt') {
+                        $verOut = & dpkg-query -W --showformat='${Version}' $pkg.name 2>&1
+                        $ver = if ($LASTEXITCODE -eq 0) { ($verOut -join '').Trim() } else { 'not installed' }
+                    } elseif ($pkg.name -eq 'aws-cli-v2') {
+                        $verOut = (& aws --version 2>&1) -join ''
+                        $ver = if ($LASTEXITCODE -eq 0) { $verOut.Trim() } else { 'not installed' }
+                    } elseif ($pkg.name -eq 'terraform') {
+                        $verOut = (& terraform version 2>&1 | Select-Object -First 1) -join ''
+                        $ver = if ($LASTEXITCODE -eq 0) { $verOut.Trim() } else { 'not installed' }
+                    }
+                    $isInstalled = $ver -ne 'not installed'
+                    $result += @{ name = $pkg.name; version = $ver; note = $pkg.note; source = $pkg.source; installed = $isInstalled }
+                }
+                Write-PodeJsonResponse -Value @{ success = $true; packages = $result }
             } else {
                 Write-PodeJsonResponse -Value @{ success = $false; message = "Unknown module type: $type" } -StatusCode 400
             }
@@ -1081,6 +1118,26 @@ Start-PodeServer -Threads 4 {
                 } else {
                     Write-PodeJsonResponse -Value @{ success = $true; message = "Python module '$moduleName' installed successfully" }
                 }
+            } elseif ($type -eq 'apt') {
+                if ($moduleName -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._+:-]*$') {
+                    Write-PodeJsonResponse -Value @{ success = $false; message = 'Invalid package name' } -StatusCode 400
+                    return
+                }
+                $env:DEBIAN_FRONTEND = 'noninteractive'
+                & apt-get update 2>&1 | Out-Null
+                $output = & apt-get install -y $moduleName 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) {
+                    Write-PodeJsonResponse -Value @{ success = $false; message = "apt-get install failed: $output" } -StatusCode 500
+                    return
+                }
+                $ver = (& dpkg-query -W --showformat='${Version}' $moduleName 2>&1) -join ''
+                $pkgFile = '/app/conf/apt-packages.json'
+                $packages = if (Test-Path $pkgFile) { @(Get-Content $pkgFile -Raw | ConvertFrom-Json) } else { @() }
+                if (-not ($packages | Where-Object { $_.name -eq $moduleName })) {
+                    $packages += @{ name = $moduleName; version = $ver.Trim(); source = 'apt'; note = '' }
+                    $packages | ConvertTo-Json -Depth 5 | Set-Content $pkgFile
+                }
+                Write-PodeJsonResponse -Value @{ success = $true; message = "Package '$moduleName' installed ($($ver.Trim()))" }
             } else {
                 Write-PodeJsonResponse -Value @{ success = $false; message = "Unknown module type: $type" } -StatusCode 400
             }

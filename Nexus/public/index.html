@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nexus - Automation Sequencer</title>
+    <link rel="icon" type="image/png" href="/static/n.png">
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -18,7 +19,7 @@
         <!-- Side Navigation -->
         <nav class="sidebar">
             <div class="logo">
-                <h2>Nexus</h2>
+                <img src="/static/nexuslogo.png" alt="Nexus" style="height: 80px; width: auto;">
             </div>
             <ul class="nav-menu">
                 <li><a href="#" class="nav-link active" data-panel="workflows">
@@ -43,7 +44,7 @@
                     <span>Logs</span>
                 </a></li>
                 <li><a href="#" class="nav-link" data-panel="modules">
-                    <span>Modules</span>
+                    <span>Packages / Modules</span>
                 </a></li>
                 <li><a href="#" class="nav-link" data-panel="sandbox">
                     <span>Sandbox</span>
@@ -391,8 +392,8 @@
             <!-- ===== MODULES PANEL ===== -->
             <div id="modules-panel" class="panel">
                 <div class="panel-header">
-                    <h1>Modules</h1>
-                    <p>View and install PowerShell and Python modules on the server</p>
+                    <h1>Packages / Modules</h1>
+                    <p>View and install PowerShell modules, Python packages, and system packages</p>
                 </div>
                 <div class="panel-body">
                     <div id="modules-message" class="message"></div>
@@ -401,12 +402,18 @@
                     <div style="display: flex; gap: 8px; margin-bottom: 20px;">
                         <button type="button" class="btn btn-primary btn-sm module-tab active" data-type="powershell">PowerShell</button>
                         <button type="button" class="btn btn-secondary btn-sm module-tab" data-type="python">Python</button>
+                        <button type="button" class="btn btn-secondary btn-sm module-tab" data-type="apt">System Packages</button>
+                    </div>
+
+                    <!-- APT warning banner -->
+                    <div id="apt-warning" style="display: none; background: rgba(234,88,12,0.15); border: 1px solid #ea580c; color: #fdba74; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px;">
+                        <strong>Warning:</strong> Only install system packages required by your scripts and workflows. Installing unnecessary packages may affect container stability.
                     </div>
 
                     <!-- Action buttons -->
                     <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                        <button type="button" id="show-modules-btn" class="btn btn-secondary">Show Modules</button>
-                        <button type="button" id="add-module-btn" class="btn btn-primary">Add Module</button>
+                        <button type="button" id="show-modules-btn" class="btn btn-secondary">Show</button>
+                        <button type="button" id="add-module-btn" class="btn btn-primary">Add</button>
                     </div>
 
                     <!-- Add module form (hidden) -->
@@ -558,7 +565,7 @@
 
     <!-- Script Preview Modal -->
     <div id="preview-modal" class="modal" style="display: none;">
-        <div class="modal-content" style="max-width: 800px;">
+        <div class="modal-content" style="max-width: 90vw; width: 90vw;">
             <div class="modal-header">
                 <h2 id="preview-modal-title">Preview</h2>
                 <button class="modal-close" id="close-preview-modal">&times;</button>
