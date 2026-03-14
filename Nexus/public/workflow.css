@@ -1,0 +1,240 @@
+/* Nexus - Workflow Styles */
+
+/* Workflow Ladder */
+.workflow-ladder {
+    margin: 20px 0;
+}
+
+.ladder-step {
+    position: relative;
+    background: var(--card-bg);
+    border: 1px solid #e2e8f0;
+    padding: 16px;
+    margin-bottom: 0;
+}
+
+.ladder-step + .ladder-connector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    position: relative;
+}
+
+.ladder-connector::before {
+    content: '';
+    position: absolute;
+    width: 2px;
+    height: 100%;
+    background: #cbd5e0;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.ladder-connector::after {
+    content: '▼';
+    color: #cbd5e0;
+    font-size: 10px;
+    background: #f5f5f5;
+    padding: 2px 6px;
+    position: relative;
+    z-index: 1;
+}
+
+.step-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.step-number {
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    line-height: 28px;
+    text-align: center;
+    background: #ff6600;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 50%;
+    margin-right: 10px;
+}
+
+.step-type-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.badge-powershell {
+    background: #e0f2fe;
+    color: #0369a1;
+}
+
+.badge-terraform {
+    background: #dbeafe;
+    color: #5b21b6;
+}
+
+.badge-python {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.badge-shell {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.badge-webhook {
+    background: #fce7f3;
+    color: #9d174d;
+}
+
+.badge-filecheck {
+    background: #e0e7ff;
+    color: #3730a3;
+}
+
+.step-body {
+    padding-left: 38px;
+}
+
+.step-script {
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+.kv-pair {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.kv-pair input {
+    padding: 6px 10px;
+    border: 1px solid #cbd5e0;
+    font-size: 13px;
+    font-family: inherit;
+    color: var(--text-primary);
+}
+
+.kv-pair input:focus {
+    outline: none;
+    border-color: #ff6600;
+}
+
+.kv-key {
+    width: 160px;
+}
+
+.kv-value {
+    flex: 1;
+}
+
+.kv-remove {
+    background: none;
+    border: none;
+    color: #e53e3e;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px 8px;
+}
+
+.kv-remove:hover {
+    color: #c53030;
+}
+
+/* Storage Browse Modal */
+.browse-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.1s;
+}
+
+.browse-item:hover {
+    background: #f7fafc;
+}
+
+.browse-item.browse-selected {
+    background: #ebf4ff;
+    border-left: 3px solid #ff6600;
+}
+
+.browse-item.browse-file {
+    cursor: default;
+}
+
+.add-kv-btn {
+    background: none;
+    border: 1px dashed #cbd5e0;
+    color: var(--text-secondary);
+    padding: 4px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 4px;
+}
+
+.add-kv-btn:hover {
+    border-color: #ff6600;
+    color: #ff6600;
+}
+
+/* Output capture config */
+.output-capture {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #e2e8f0;
+}
+
+.output-capture label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Workflow list cards */
+.workflow-card {
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    background-color: #f7fafc;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    border-left: 3px solid transparent;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.workflow-card:hover {
+    background-color: #edf2f7;
+    border-left-color: #ff6600;
+}
+
+.workflow-card h4 {
+    margin: 0;
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.workflow-card .step-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+}

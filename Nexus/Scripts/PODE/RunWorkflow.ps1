@@ -68,6 +68,7 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
         script  = $step.script
         webhook = $step.webhook
         filecheck = $step.filecheck
+        command = ''
         status  = 'running'
         output  = ''
         error   = ''
@@ -110,6 +111,42 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
         $output = $null
         $stdOut = $null
         $stdErr = $null
+
+        # Build human-readable command string for logging
+        $commandStr = switch ($step.type) {
+            'powershell' {
+                $paramStr = ($params.GetEnumerator() | ForEach-Object { "-$($_.Key) $($_.Value)" }) -join ' '
+                "& ./$($step.script)$(if ($paramStr) { " $paramStr" })"
+            }
+            'python' {
+                $argStr = ($params.GetEnumerator() | ForEach-Object { "--$($_.Key) $($_.Value)" }) -join ' '
+                "python3 $($step.script)$(if ($argStr) { " $argStr" })"
+            }
+            'shell' {
+                $envStr = ($params.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' '
+                "$(if ($envStr) { "$envStr " })bash ./$($step.script)"
+            }
+            'terraform' {
+                $varStr = ($params.GetEnumerator() | ForEach-Object { "-var `"$($_.Key)=$($_.Value)`"" }) -join ' '
+                "terraform apply -auto-approve $($step.script)$(if ($varStr) { " $varStr" })"
+            }
+            'webhook' {
+                $bodyPreview = if ($params.Count -gt 0) { ($params | ConvertTo-Json -Depth 5 -Compress) } else { '{}' }
+                "POST $($step.webhook) | Body: $bodyPreview"
+            }
+            'filecheck' {
+                "FileCheck $($step.filecheck) | Container: $($params['container']) Path: $($params['folderPath']) Timeout: $($params['timeout'])m"
+            }
+        }
+
+        # Log command to console, engine log, and step log before execution
+        if ($commandStr) {
+            $stepLog.command = $commandStr
+            [void]$allOutput.AppendLine("  > $commandStr")
+            [void]$allOutput.AppendLine("")
+            try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+            Write-EngineLog "STEP EXEC: '$Name' $stepLabel — $commandStr"
+        }
 
         switch ($step.type) {
             'powershell' {
@@ -252,6 +289,10 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
                 if (-not $whContent) { throw "Webhook '$($step.webhook)' not found" }
                 $wh = $whContent | ConvertFrom-Json
 
+                # Update command string with actual URI now that webhook config is loaded
+                $bodyPreview = if ($params.Count -gt 0) { ($params | ConvertTo-Json -Depth 5 -Compress) } else { '{}' }
+                $stepLog.command = "POST $($wh.uri) | Body: $bodyPreview"
+
                 $headers = @{ 'Content-Type' = 'application/json' }
 
                 if ($wh.authType -eq 'oauth') {
@@ -279,6 +320,9 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
                 $fcContent = Read-Blob -Container 'nexus-config' -BlobPath "filechecks/$($step.filecheck).json"
                 if (-not $fcContent) { throw "File Check '$($step.filecheck)' not found" }
                 $fc = $fcContent | ConvertFrom-Json
+
+                # Update command string with storage account from config
+                $stepLog.command = "FileCheck $($step.filecheck) | Account: $($fc.storageAccount) Container: $($params['container']) Path: $($params['folderPath']) Timeout: $($params['timeout'])m"
 
                 # Get params: container, folderPath, timeout
                 $containerName = $params['container']
