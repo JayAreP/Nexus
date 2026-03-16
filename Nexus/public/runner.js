@@ -8,7 +8,8 @@ async function loadWorkflowDropdowns() {
         const selects = [
             document.getElementById('run-workflow-select'),
             document.getElementById('schedule-workflow-select'),
-            document.getElementById('logs-workflow-select')
+            document.getElementById('logs-workflow-select'),
+            document.getElementById('test-workflow-select')
         ];
         selects.forEach(sel => {
             if (!sel) return;
@@ -98,6 +99,99 @@ document.getElementById('close-console-btn').addEventListener('click', () => {
 document.getElementById('live-console-backdrop').addEventListener('click', () => {
     document.getElementById('live-console').classList.remove('open');
     document.getElementById('live-console-backdrop').classList.remove('active');
+});
+
+// ===== TEST STEP =====
+document.getElementById('test-workflow-select').addEventListener('change', async () => {
+    const name = document.getElementById('test-workflow-select').value;
+    const stepSel = document.getElementById('test-step-select');
+    const runBtn = document.getElementById('test-step-btn');
+    stepSel.innerHTML = '<option value="">-- Select a step --</option>';
+    stepSel.disabled = true;
+    runBtn.disabled = true;
+    if (!name) return;
+    try {
+        const r = await fetch(`/api/workflows/${encodeURIComponent(name)}`);
+        const data = await r.json();
+        if (data.success && data.workflow && data.workflow.steps) {
+            data.workflow.steps.forEach((s, idx) => {
+                const label = s.script || s.webhook || s.filecheck || s.type;
+                const opt = document.createElement('option');
+                opt.value = idx;
+                opt.textContent = `Step ${idx + 1}: [${s.type}] ${label}`;
+                stepSel.appendChild(opt);
+            });
+            stepSel.disabled = false;
+        }
+    } catch (err) { }
+});
+
+document.getElementById('test-step-select').addEventListener('change', () => {
+    document.getElementById('test-step-btn').disabled =
+        document.getElementById('test-step-select').value === '';
+});
+
+document.getElementById('test-step-btn').addEventListener('click', async () => {
+    const name = document.getElementById('test-workflow-select').value;
+    const stepIndex = parseInt(document.getElementById('test-step-select').value, 10);
+    if (!name || isNaN(stepIndex)) {
+        showMessage('runner-message', 'error', 'Select a workflow and step first');
+        return;
+    }
+    const btn = document.getElementById('test-step-btn');
+    const stepLabel = document.getElementById('test-step-select').selectedOptions[0].textContent;
+    const consoleEl = document.getElementById('live-console');
+    const consoleOut = document.getElementById('live-console-output');
+
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+    showMessage('runner-message', 'info', `Testing ${stepLabel} of "${name}"...`);
+
+    consoleOut.textContent = 'Waiting for output...\n';
+    document.getElementById('live-console-title').textContent = `Console — ${name} — ${stepLabel}`;
+    consoleEl.classList.add('open');
+    document.getElementById('live-console-backdrop').classList.add('active');
+
+    try {
+        const r = await fetch(`/api/workflows/${encodeURIComponent(name)}/run-step`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stepIndex })
+        });
+        const data = await r.json();
+        if (!data.success) {
+            showMessage('runner-message', 'error', data.message);
+            btn.disabled = false;
+            btn.textContent = 'Run Step';
+            return;
+        }
+    } catch (err) {
+        showMessage('runner-message', 'error', 'Error: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = 'Run Step';
+        return;
+    }
+
+    // Poll console until finished (same console endpoint — uses same temp file)
+    while (true) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+            const cr = await fetch(`/api/workflows/${encodeURIComponent(name)}/console`);
+            const cd = await cr.json();
+            if (cd.output) {
+                consoleOut.textContent = cd.output;
+                consoleOut.scrollTop = consoleOut.scrollHeight;
+            }
+            if (!cd.running) {
+                const status = cd.status || 'unknown';
+                const msg = cd.message || `${stepLabel} finished (${status})`;
+                showMessage('runner-message', status === 'success' ? 'success' : 'error', msg);
+                break;
+            }
+        } catch (_) { }
+    }
+    btn.disabled = false;
+    btn.textContent = 'Run Step';
 });
 
 // Engine Log viewer

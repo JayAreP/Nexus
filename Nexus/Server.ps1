@@ -945,6 +945,41 @@ Start-PodeServer -Threads 4 {
         Write-PodeJsonResponse -Value @{ success = $true; message = "Workflow '$name' started" }
     }
 
+    # Run a single step (test mode) — fires async and returns immediately
+    Add-PodeRoute -Method Post -Path '/api/workflows/:name/run-step' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        $stepIndex = [int]$WebEvent.Data.stepIndex
+        $running = Get-PodeState -Name 'RunningWorkflows'
+        if (-not $running.TryAdd($name, [byte]0)) {
+            Write-EngineLog "RUN-STEP BLOCKED: '$name' — already running" 'WARN'
+            Write-PodeJsonResponse -Value @{ success = $false; message = "Workflow '$name' is already running" } -StatusCode 409
+            return
+        }
+        Write-EngineLog "RUN-STEP REQUEST: '$name' step $($stepIndex + 1) — accepted, firing timer"
+        $results = Get-PodeState -Name 'WorkflowResults'
+        $results[$name] = @{ status = 'running'; message = '' }
+        $timerName = "wf-step-$name-$stepIndex-$((Get-Date).Ticks)"
+        Add-PodeTimer -Name $timerName -Interval 1 -Limit 1 -ArgumentList @($name, $stepIndex) -ScriptBlock {
+            param($wfName, $si)
+            Write-EngineLog "TIMER FIRED: '$wfName' step $($si + 1) — starting execution"
+            $running = Get-PodeState -Name 'RunningWorkflows'
+            $results = Get-PodeState -Name 'WorkflowResults'
+            try {
+                $result = & './Scripts/PODE/RunWorkflow.ps1' -Name $wfName -StepIndex $si
+                $status = if ($result.success) { 'success' } else { 'failed' }
+                $results[$wfName] = @{ status = $status; message = $result.message }
+                Write-EngineLog "RUN-STEP COMPLETE: '$wfName' step $($si + 1) — $status — $($result.message)"
+            } catch {
+                $results[$wfName] = @{ status = 'failed'; message = $_.Exception.Message }
+                Write-EngineLog "RUN-STEP EXCEPTION: '$wfName' step $($si + 1) — $($_.Exception.Message)" 'ERROR'
+            } finally {
+                [void]$running.TryRemove($wfName, [ref][byte]0)
+                Write-EngineLog "LOCK RELEASED: '$wfName'"
+            }
+        }
+        Write-PodeJsonResponse -Value @{ success = $true; message = "Test step $($stepIndex + 1) of '$name' started" }
+    }
+
     # Live console output (polls temp file written by RunWorkflow)
     Add-PodeRoute -Method Get -Path '/api/workflows/:name/console' -ScriptBlock {
         $name = $WebEvent.Parameters['name']

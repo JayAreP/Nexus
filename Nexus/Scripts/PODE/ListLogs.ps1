@@ -15,8 +15,8 @@ try {
             lastModified = $blob.LastModified.ToString('yyyy-MM-dd HH:mm:ss')
         }
     }
-    # Sort newest first
-    $logs = $logs | Sort-Object { $_.name } -Descending
+    # Sort newest first (by name which contains timestamp)
+    $logs = @($logs | Sort-Object { $_.lastModified } -Descending)
     return @{ success = $true; logs = $logs }
 } catch {
     return @{ success = $false; message = "Error listing logs: $($_.Exception.Message)"; logs = @() }

@@ -1,7 +1,8 @@
 # Execute a workflow — sequential step ladder
 # Downloads each script from blob, runs it with translated params, captures output, chains to next step
 param(
-    [Parameter(Mandatory)] [string]$Name
+    [Parameter(Mandatory)] [string]$Name,
+    [int]$StepIndex = -1   # -1 = run all steps; 0-based index = run single step only
 )
 
 # Engine log helper (daily rotation — matches Server.ps1 pattern)
@@ -16,10 +17,12 @@ function Write-EngineLog {
 }
 
 $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
-$logBaseName = "$Name-$timestamp"
+$isSingleStep = $StepIndex -ge 0
+$logBaseName = if ($isSingleStep) { "$Name-step$($StepIndex + 1)-$timestamp" } else { "$Name-$timestamp" }
 $logContainerName = ($Name -replace '[^a-z0-9-]', '-').ToLower()
 
-Write-EngineLog "WORKFLOW START: '$Name' (run: $logBaseName, steps: pending)"
+$runLabel = if ($isSingleStep) { "TEST-STEP $($StepIndex + 1)" } else { 'FULL RUN' }
+Write-EngineLog "WORKFLOW START: '$Name' ($runLabel, run: $logBaseName, steps: pending)"
 
 # Ensure log container exists
 try {
@@ -38,7 +41,10 @@ if (-not $wfContent) {
 
 $workflow = $wfContent | ConvertFrom-Json
 $steps = @($workflow.steps)
-Write-EngineLog "WORKFLOW LOADED: '$Name' — $($steps.Count) steps"
+if ($isSingleStep -and ($StepIndex -ge $steps.Count)) {
+    return @{ success = $false; message = "Step index $StepIndex is out of range (workflow has $($steps.Count) steps)"; statusCode = 400 }
+}
+Write-EngineLog "WORKFLOW LOADED: '$Name' — $($steps.Count) steps$(if ($isSingleStep) { " (testing step $($StepIndex + 1) only)" })"
 
 $runLog = @{
     workflow  = $Name
@@ -50,16 +56,21 @@ $runLog = @{
 # Collect all stdout and stderr across steps
 $allOutput = [System.Text.StringBuilder]::new()
 $allErrors = [System.Text.StringBuilder]::new()
+$allInfo   = [System.Text.StringBuilder]::new()  # Write-Host / Information stream (PowerShell steps only)
 
 # Live console temp file — frontend polls this for real-time output
 $consoleTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-console-$($Name.ToLower()).log"
-[System.IO.File]::WriteAllText($consoleTempFile, "========== RUN: $logBaseName ==========`n`n", [System.Text.Encoding]::UTF8)
+$consoleHeader = if ($isSingleStep) { "========== TEST STEP $($StepIndex + 1): $logBaseName =========="  } else { "========== RUN: $logBaseName ==========" }
+[System.IO.File]::WriteAllText($consoleTempFile, "$consoleHeader`n`n", [System.Text.Encoding]::UTF8)
 
 $capturedOutputs = @{}  # Variable store for output chaining between steps
 
 $allPassed = $true
 
-for ($i = 0; $i -lt $steps.Count; $i++) {
+$startStep = if ($isSingleStep) { $StepIndex } else { 0 }
+$endStep   = if ($isSingleStep) { $StepIndex + 1 } else { $steps.Count }
+
+for ($i = $startStep; $i -lt $endStep; $i++) {
     $step = $steps[$i]
     $stepLabel = "Step $($i + 1): [$($step.type)] $($step.script)$($step.webhook)$($step.filecheck)"
     $stepLog = @{
@@ -111,6 +122,7 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
         $output = $null
         $stdOut = $null
         $stdErr = $null
+        $stdInfo = $null
 
         # Build human-readable command string for logging
         $commandStr = switch ($step.type) {
@@ -156,25 +168,29 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
                 $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-ps-$timestamp-$i.ps1"
                 try {
                     [System.IO.File]::WriteAllText($tempScript, $scriptContent, [System.Text.Encoding]::UTF8)
-                    # Capture stdout and stderr separately
+                    # Capture stdout, stderr, and Information stream (Write-Host) separately
                     $rawOutput = if ($params.Count -gt 0) {
-                        & $tempScript @params 2>&1
+                        & $tempScript @params 6>&1 2>&1
                     } else {
-                        & $tempScript 2>&1
+                        & $tempScript 6>&1 2>&1
                     }
-                    # Separate stdout from stderr
+                    # Separate stdout, stderr, and Information stream
                     $stdOutLines = @()
                     $stdErrLines = @()
+                    $stdInfoLines = @()
                     foreach ($line in $rawOutput) {
                         if ($line -is [System.Management.Automation.ErrorRecord]) {
                             $stdErrLines += $line.ToString()
+                        } elseif ($line -is [System.Management.Automation.InformationRecord]) {
+                            $stdInfoLines += $line.MessageData.ToString()
                         } else {
                             $stdOutLines += $line.ToString()
                         }
                     }
-                    $stdOut = $stdOutLines -join "`n"
-                    $stdErr = $stdErrLines -join "`n"
-                    $output = $stdOut
+                    $stdOut  = $stdOutLines  -join "`n"
+                    $stdErr  = $stdErrLines  -join "`n"
+                    $stdInfo = $stdInfoLines -join "`n"
+                    $output  = $stdOut
                 } finally {
                     if (Test-Path $tempScript) { Remove-Item $tempScript -Force -ErrorAction SilentlyContinue }
                 }
@@ -416,6 +432,13 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
 
         # Append step output to full log
         if ($stdOut) { [void]$allOutput.AppendLine($stdOut) }
+        if ($stdInfo) {
+            [void]$allInfo.AppendLine("=========================================")
+            [void]$allInfo.AppendLine("  $stepLabel")
+            [void]$allInfo.AppendLine("=========================================")
+            [void]$allInfo.AppendLine($stdInfo)
+            [void]$allInfo.AppendLine("")
+        }
         if ($stdErr) {
             [void]$allErrors.AppendLine("=========================================")
             [void]$allErrors.AppendLine("  $stepLabel")
@@ -505,14 +528,52 @@ for ($i = 0; $i -lt $steps.Count; $i++) {
         $allPassed = $false
         Write-EngineLog "STEP FAILED: '$Name' $stepLabel — $($_.Exception.Message)" 'ERROR'
 
-        # Log the error
+        # Log the exception
         [void]$allErrors.AppendLine("=========================================")
         [void]$allErrors.AppendLine("  $stepLabel — EXCEPTION")
         [void]$allErrors.AppendLine("=========================================")
         [void]$allErrors.AppendLine($_.Exception.Message)
+
+        # Include full stack trace for deeper debugging
+        if ($_.Exception.StackTrace) {
+            [void]$allErrors.AppendLine("")
+            [void]$allErrors.AppendLine("--- Stack Trace ---")
+            [void]$allErrors.AppendLine($_.Exception.StackTrace)
+        }
+        if ($_.Exception.InnerException) {
+            [void]$allErrors.AppendLine("")
+            [void]$allErrors.AppendLine("--- Inner Exception ---")
+            [void]$allErrors.AppendLine($_.Exception.InnerException.Message)
+        }
+
+        # Include any non-terminating errors (stderr) captured before the exception
+        if (![string]::IsNullOrWhiteSpace($stdErr)) {
+            [void]$allErrors.AppendLine("")
+            [void]$allErrors.AppendLine("--- Script Error Stream (non-terminating) ---")
+            [void]$allErrors.AppendLine($stdErr)
+        }
+
+        # Include $Error variable — catches module-level errors not surfaced by 2>&1
+        $sessionErrors = $Error | Where-Object { $_ -ne $null } | Select-Object -First 10
+        if ($sessionErrors) {
+            [void]$allErrors.AppendLine("")
+            [void]$allErrors.AppendLine("--- `$Error (session, last 10) ---")
+            foreach ($e in $sessionErrors) {
+                [void]$allErrors.AppendLine("  $($e.ToString())")
+                if ($e.ScriptStackTrace) {
+                    [void]$allErrors.AppendLine("    at: $($e.ScriptStackTrace -replace "`n", "`n    at: ")")
+                }
+            }
+        }
+
         [void]$allErrors.AppendLine("")
 
         [void]$allOutput.AppendLine("FAILED: $($_.Exception.Message)")
+        if (![string]::IsNullOrWhiteSpace($stdErr)) {
+            [void]$allOutput.AppendLine("")
+            [void]$allOutput.AppendLine("--- Script Errors ---")
+            [void]$allOutput.AppendLine($stdErr)
+        }
         [void]$allOutput.AppendLine("")
 
         # Update live console temp file on failure too
@@ -560,10 +621,27 @@ try {
     Write-Host "Failed to save error log: $($_.Exception.Message)" -ForegroundColor Red
 }
 
+# Save information stream log (Write-Host output from PowerShell steps)
+try {
+    $infoText = $allInfo.ToString()
+    if (![string]::IsNullOrWhiteSpace($infoText)) {
+        Write-Blob -Container $logContainerName -BlobPath "logs/$logBaseName-information.log" -Content $infoText
+    }
+} catch {
+    Write-Host "Failed to save information log: $($_.Exception.Message)" -ForegroundColor Red
+}
+
 # Final update to live console temp file before it's done
 try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
-$statusMsg = if ($allPassed) { "Workflow '$Name' completed successfully ($($steps.Count) steps)" } else { "Workflow '$Name' failed at step $($runLog.steps.Count)" }
+$stepsRan = if ($isSingleStep) { "step $($StepIndex + 1)" } else { "$($steps.Count) steps" }
+$statusMsg = if ($allPassed) {
+    if ($isSingleStep) { "Test step $($StepIndex + 1) of '$Name' completed successfully" }
+    else { "Workflow '$Name' completed successfully ($($steps.Count) steps)" }
+} else {
+    if ($isSingleStep) { "Test step $($StepIndex + 1) of '$Name' failed" }
+    else { "Workflow '$Name' failed at step $($runLog.steps.Count)" }
+}
 Write-EngineLog "WORKFLOW END: '$Name' — $($runLog.status) — $statusMsg"
 return @{
     success = $allPassed

@@ -333,6 +333,21 @@
                         <button type="button" id="run-workflow-btn" class="btn btn-primary">Run Now</button>
                     </div>
 
+                    <!-- Test Step -->
+                    <div style="border-top: 1px solid var(--border); padding-top: 24px; margin-bottom: 32px;">
+                        <h3 style="margin-bottom: 16px; font-size: 15px; color: var(--text-primary);">Test Step</h3>
+                        <p style="margin-bottom: 12px; font-size: 13px; color: var(--text-muted);">Run a single step from a workflow in isolation.</p>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <select id="test-workflow-select" style="flex: 1;">
+                                <option value="">-- Select a workflow --</option>
+                            </select>
+                            <select id="test-step-select" style="flex: 1;" disabled>
+                                <option value="">-- Select a step --</option>
+                            </select>
+                            <button type="button" id="test-step-btn" class="btn btn-primary" disabled>Run Step</button>
+                        </div>
+                    </div>
+
                     <!-- Schedules -->
                     <div style="border-top: 1px solid var(--border); padding-top: 24px;">
                         <div class="section-header">
