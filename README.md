@@ -1,5 +1,45 @@
 # Nexus - Automation Sequencer
 
+## Prerequisites
+
+Before starting you'll need an Azure Service Principal and an encryption key for the credential store.
+
+### Create a Service Principal
+
+```powershell
+az ad sp create-for-rbac --name "nexus-sp" --skip-assignment
+```
+
+Output:
+```json
+{
+  "appId":    "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",   ← AZURE_CLIENT_ID
+  "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", ← AZURE_CLIENT_SECRET
+  "tenant":   "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"    ← AZURE_TENANT_ID
+}
+```
+
+> Save the `password` immediately — it cannot be retrieved after creation.  
+> To reset later: `az ad sp credential reset --name "nexus-sp"`
+
+### Generate a NEXUS_CREDENTIAL_KEY
+
+Secret fields are encrypted with AES-256. The key must be a 32-byte base64-encoded value.
+
+PowerShell:
+```powershell
+[Convert]::ToBase64String((1..32 | ForEach-Object { [byte](Get-Random -Max 256) }))
+```
+
+Bash / Linux:
+```bash
+openssl rand -base64 32
+```
+
+Keep this value consistent between restarts — changing it will invalidate stored credentials.
+
+---
+
 ## Quick Start (local build)
 
 This builds the image from source. For deploying the pre-published image from GHCR, see [Deploy-to-ACA.md](Deploy-to-ACA.md).
@@ -142,25 +182,9 @@ Pode (PowerShell web framework), Az.Storage module, Docker, vanilla JS frontend.
 
 ## Azure Setup
 
-### 1. Create a Service Principal
+See [Prerequisites](#prerequisites) above for creating the service principal.
 
-```powershell
-az ad sp create-for-rbac --name "nexus-sp" --skip-assignment
-```
-
-Output:
-```json
-{
-  "appId":    "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",   ← AZURE_CLIENT_ID
-  "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", ← AZURE_CLIENT_SECRET
-  "tenant":   "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"    ← AZURE_TENANT_ID
-}
-```
-
-> Save the `password` immediately — it cannot be retrieved after creation.  
-> To reset later: `az ad sp credential reset --name "nexus-sp"`
-
-### 2. Assign Storage Roles
+### 1. Assign Storage Roles
 
 Nexus only needs access to Azure Blob Storage. Assign these two roles on the **storage account** (not the subscription) to follow least-privilege:
 
@@ -191,7 +215,7 @@ az role assignment create `
 
 > **Note:** `Storage Blob Data Contributor` is sufficient for all Nexus operations. Do **not** assign `Contributor` or `Owner` at the subscription level — Nexus does not need control-plane access.
 
-### 3. Verify access
+### 2. Verify access
 
 ```powershell
 az login --service-principal `
@@ -220,26 +244,7 @@ Set these in `.env` (read by docker-compose):
 
 The Credentials panel lets you store secrets (passwords, Azure service principals, AWS keys, GCP service accounts, API keys, tokens, connection strings) encrypted at rest in blob storage.
 
-Secret fields are encrypted with AES-256 using the `NEXUS_CREDENTIAL_KEY` environment variable. This key must be a 32-byte value, base64-encoded.
-
-### Generate a credential key
-
-PowerShell:
-```powershell
-[Convert]::ToBase64String((1..32 | ForEach-Object { [byte](Get-Random -Max 256) }))
-```
-
-Bash / Linux:
-```bash
-openssl rand -base64 32
-```
-
-Add the result to your `.env` file:
-```
-NEXUS_CREDENTIAL_KEY=your-generated-key-here
-```
-
-Then recreate the container (`docker-compose up -d`) for the new env var to take effect.
+Secret fields are encrypted with AES-256 using `NEXUS_CREDENTIAL_KEY`. See [Prerequisites](#prerequisites) above for how to generate the key. Add it to your `.env` file and recreate the container (`docker-compose up -d`) for any change to take effect.
 
 ### NLS Client Modules
 
