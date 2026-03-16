@@ -2,7 +2,9 @@
 param(
     [Parameter(Mandatory)] [string]$StorageAccount,
     [Parameter(Mandatory)] [string]$Key,
-    [Parameter(Mandatory)] [string]$ResourceGroup
+    [Parameter(Mandatory)] [string]$ResourceGroup,
+    [bool]$LogRetentionEnabled = $false,
+    [int]$LogRetentionDays = 30
 )
 
 $confDir = './conf'
@@ -11,9 +13,11 @@ if (-not (Test-Path $confDir)) {
 }
 
 $config = @{
-    storageAccount = $StorageAccount
-    key            = $Key
-    resourceGroup  = $ResourceGroup
+    storageAccount      = $StorageAccount
+    key                 = $Key
+    resourceGroup       = $ResourceGroup
+    logRetentionEnabled = $LogRetentionEnabled
+    logRetentionDays    = $LogRetentionDays
 }
 
 $config | ConvertTo-Json | Set-Content -Path './conf/config.json'

@@ -70,6 +70,11 @@ async function loadConfig() {
             document.getElementById('config-storage-account').value = data.storageAccount || '';
             document.getElementById('config-key').value = data.key || '';
             document.getElementById('config-resource-group').value = data.resourceGroup || '';
+            const retCb = document.getElementById('config-log-retention-enabled');
+            const retDays = document.getElementById('config-log-retention-days');
+            retCb.checked = !!data.logRetentionEnabled;
+            retDays.value = data.logRetentionDays || 30;
+            retDays.disabled = !retCb.checked;
         }
     } catch (err) {
         showMessage('config-message', 'error', 'Failed to load config: ' + err.message);
@@ -85,7 +90,9 @@ document.getElementById('config-form').addEventListener('submit', async (e) => {
             body: JSON.stringify({
                 storageAccount: document.getElementById('config-storage-account').value,
                 key: document.getElementById('config-key').value,
-                resourceGroup: document.getElementById('config-resource-group').value
+                resourceGroup: document.getElementById('config-resource-group').value,
+                logRetentionEnabled: document.getElementById('config-log-retention-enabled').checked,
+                logRetentionDays: parseInt(document.getElementById('config-log-retention-days').value, 10) || 30
             })
         });
         const data = await r.json();
@@ -93,6 +100,10 @@ document.getElementById('config-form').addEventListener('submit', async (e) => {
     } catch (err) {
         showMessage('config-message', 'error', 'Error saving config: ' + err.message);
     }
+});
+
+document.getElementById('config-log-retention-enabled').addEventListener('change', (e) => {
+    document.getElementById('config-log-retention-days').disabled = !e.target.checked;
 });
 
 document.getElementById('prepare-containers-btn').addEventListener('click', async () => {

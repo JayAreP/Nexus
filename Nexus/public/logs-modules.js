@@ -13,6 +13,7 @@ document.getElementById('load-logs-btn').addEventListener('click', () => {
 async function loadLogs(workflow) {
     const listEl = document.getElementById('logs-list');
     const emptyEl = document.getElementById('logs-empty');
+    const clearControls = document.getElementById('logs-clear-controls');
     listEl.innerHTML = '';
 
     try {
@@ -20,6 +21,7 @@ async function loadLogs(workflow) {
         const data = await r.json();
         if (data.success && data.logs && data.logs.length > 0) {
             emptyEl.style.display = 'none';
+            clearControls.style.display = 'block';
             data.logs.forEach(log => {
                 const row = document.createElement('div');
                 row.className = 'log-file-row';
@@ -32,6 +34,7 @@ async function loadLogs(workflow) {
             });
         } else {
             emptyEl.style.display = 'block';
+            clearControls.style.display = 'none';
             emptyEl.querySelector('p').textContent = 'No logs found for this workflow.';
         }
     } catch (err) {
@@ -82,6 +85,30 @@ async function viewLogDetail(workflow, logName) {
 
 document.getElementById('close-log-modal').addEventListener('click', () => {
     document.getElementById('log-detail-modal').style.display = 'none';
+});
+
+document.getElementById('clear-old-logs-btn').addEventListener('click', async () => {
+    const workflow = document.getElementById('logs-workflow-select').value;
+    const days = parseInt(document.getElementById('logs-clear-days').value, 10);
+    if (!workflow || !days || days < 1) {
+        showMessage('logs-message', 'error', 'Select a workflow and enter a valid number of days');
+        return;
+    }
+    if (!confirm(`Delete all logs older than ${days} days for "${workflow}"?`)) return;
+    const btn = document.getElementById('clear-old-logs-btn');
+    btn.disabled = true;
+    btn.textContent = 'Clearing...';
+    try {
+        const r = await fetch(`/api/logs/${encodeURIComponent(workflow)}/clear?days=${days}`, { method: 'DELETE' });
+        const data = await r.json();
+        showMessage('logs-message', data.success ? 'success' : 'error', data.message);
+        if (data.success) loadLogs(workflow);
+    } catch (err) {
+        showMessage('logs-message', 'error', 'Error: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Clear';
+    }
 });
 
 // ===== MODULES =====

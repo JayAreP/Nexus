@@ -297,17 +297,21 @@ Start-PodeServer -Threads 4 {
             if (Test-Path $configPath) {
                 $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
                 Write-PodeJsonResponse -Value @{
-                    success        = $true
-                    storageAccount = $config.storageAccount
-                    key            = $config.key
-                    resourceGroup  = $config.resourceGroup
+                    success             = $true
+                    storageAccount      = $config.storageAccount
+                    key                 = $config.key
+                    resourceGroup       = $config.resourceGroup
+                    logRetentionEnabled = [bool]$config.logRetentionEnabled
+                    logRetentionDays    = if ($config.logRetentionDays) { [int]$config.logRetentionDays } else { 30 }
                 }
             } else {
                 Write-PodeJsonResponse -Value @{
-                    success        = $true
-                    storageAccount = ''
-                    key            = ''
-                    resourceGroup  = ''
+                    success             = $true
+                    storageAccount      = ''
+                    key                 = ''
+                    resourceGroup       = ''
+                    logRetentionEnabled = $false
+                    logRetentionDays    = 30
                 }
             }
         } catch {
@@ -318,7 +322,7 @@ Start-PodeServer -Threads 4 {
     Add-PodeRoute -Method Post -Path '/api/config' -ScriptBlock {
         $body = $WebEvent.Data
         try {
-            $result = & './Scripts/PODE/SaveConfig.ps1' -StorageAccount $body.storageAccount -Key $body.key -ResourceGroup $body.resourceGroup
+            $result = & './Scripts/PODE/SaveConfig.ps1' -StorageAccount $body.storageAccount -Key $body.key -ResourceGroup $body.resourceGroup -LogRetentionEnabled ([bool]$body.logRetentionEnabled) -LogRetentionDays ([int]($body.logRetentionDays))
             if ($result.statusCode) {
                 Write-PodeJsonResponse -Value $result -StatusCode $result.statusCode
             } else {
@@ -1097,6 +1101,19 @@ Start-PodeServer -Threads 4 {
         }
     }
 
+    # Clear old logs for a workflow
+    Add-PodeRoute -Method Delete -Path '/api/logs/:workflow/clear' -ScriptBlock {
+        $workflow = $WebEvent.Parameters['workflow']
+        $days = [int]$WebEvent.Query['days']
+        if ($days -lt 1) { $days = 30 }
+        try {
+            $result = & './Scripts/PODE/ClearOldLogs.ps1' -Workflow $workflow -Days $days
+            Write-PodeJsonResponse -Value $result
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
     # ===== MODULE MANAGEMENT ROUTES =====
 
     # List installed modules
@@ -1364,6 +1381,50 @@ Start-PodeServer -Threads 4 {
             }
         } catch {
             Write-Host "Schedule timer error: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+
+    # Daily log cleanup — runs every hour, acts once per day around midnight
+    Add-PodeTimer -Name 'LogCleanup' -Interval 3600 -ScriptBlock {
+        try {
+            $configPath = './conf/config.json'
+            if (-not (Test-Path $configPath)) { return }
+            $cfg = Get-Content -Path $configPath -Raw | ConvertFrom-Json
+            if (-not $cfg.logRetentionEnabled) { return }
+            $days = if ($cfg.logRetentionDays) { [int]$cfg.logRetentionDays } else { 30 }
+
+            # Only run once per day — check marker file
+            $markerFile = Join-Path ([System.IO.Path]::GetTempPath()) 'nexus-log-cleanup-last.txt'
+            if (Test-Path $markerFile) {
+                $lastRun = Get-Content $markerFile -Raw
+                if ($lastRun -eq (Get-Date -Format 'yyyy-MM-dd')) { return }
+            }
+
+            Write-EngineLog "LOG CLEANUP: Starting — removing logs older than $days days"
+            $ctx = New-AzStorageContext -StorageAccountName $cfg.storageAccount -StorageAccountKey $cfg.key
+            $workflows = Get-AzStorageBlob -Container 'nexus-config' -Prefix 'workflows/' -Context $ctx -ErrorAction SilentlyContinue
+            $cutoff = (Get-Date).AddDays(-$days)
+            $totalRemoved = 0
+
+            foreach ($wfBlob in $workflows) {
+                if ($wfBlob.Name -notmatch '\.json$') { continue }
+                $wfName = ($wfBlob.Name -replace '^workflows/', '') -replace '\.json$', ''
+                $containerName = ($wfName -replace '[^a-z0-9-]', '-').ToLower()
+                try {
+                    $logBlobs = Get-AzStorageBlob -Container $containerName -Prefix 'logs/' -Context $ctx -ErrorAction SilentlyContinue
+                    foreach ($lb in $logBlobs) {
+                        if ($lb.LastModified -lt $cutoff) {
+                            Remove-AzStorageBlob -Container $containerName -Blob $lb.Name -Context $ctx -Force -ErrorAction SilentlyContinue
+                            $totalRemoved++
+                        }
+                    }
+                } catch { }
+            }
+
+            [System.IO.File]::WriteAllText($markerFile, (Get-Date -Format 'yyyy-MM-dd'))
+            Write-EngineLog "LOG CLEANUP: Complete — removed $totalRemoved log blobs"
+        } catch {
+            Write-Host "Log cleanup timer error: $($_.Exception.Message)" -ForegroundColor Red
         }
     }
 }
