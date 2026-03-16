@@ -184,36 +184,47 @@ Pode (PowerShell web framework), Az.Storage module, Docker, vanilla JS frontend.
 
 See [Prerequisites](#prerequisites) above for creating the service principal.
 
-### 1. Assign Storage Roles
+### 1. Assign Roles
 
-Nexus only needs access to Azure Blob Storage. Assign these two roles on the **storage account** (not the subscription) to follow least-privilege:
+Nexus requires two levels of access:
 
-| Role | Purpose |
-|------|---------|
-| `Storage Blob Data Contributor` | Read, write, and delete blobs (workflows, scripts, logs, credentials) |
-| `Storage Blob Data Reader` | *(Optional)* Read-only access if you want a separate read account |
+| Scope | Role | Purpose |
+|-------|------|---------|
+| Subscription | `Reader` | Read Azure resources (resource groups, storage accounts, etc.) across the subscription |
+| Storage Account (or RG) | `Storage Blob Data Contributor` | Read, write, and delete blobs (workflows, scripts, logs, credentials) |
 
 ```powershell
 # Get the service principal's object ID
 $spId = az ad sp show --id "<AZURE_CLIENT_ID>" --query id -o tsv
 
-# Assign Storage Blob Data Contributor on the storage account
+# 1. Reader on the entire subscription (read-only control plane access)
+az role assignment create `
+  --assignee $spId `
+  --role "Reader" `
+  --scope "/subscriptions/<SUBSCRIPTION_ID>"
+
+# 2. Storage Blob Data Contributor on the storage account (data plane access)
 az role assignment create `
   --assignee $spId `
   --role "Storage Blob Data Contributor" `
   --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>/providers/Microsoft.Storage/storageAccounts/<STORAGE_ACCOUNT_NAME>"
 ```
 
-If you prefer to scope at the resource group level instead (simpler, slightly broader):
+If you prefer to scope the blob role at the resource group level instead (simpler, slightly broader):
 
 ```powershell
 az role assignment create `
   --assignee $spId `
   --role "Storage Blob Data Contributor" `
   --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>"
+
+az role assignment create `
+>>   --assignee $spId `
+>>   --role "Storage Blob Data Reader" `
+>>   --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>"
 ```
 
-> **Note:** `Storage Blob Data Contributor` is sufficient for all Nexus operations. Do **not** assign `Contributor` or `Owner` at the subscription level — Nexus does not need control-plane access.
+> **Note:** `Reader` at the subscription level is read-only and cannot create, modify, or delete any resources. `Storage Blob Data Contributor` is a data-plane role and only grants access to blob content — not the storage account itself. Do **not** assign `Contributor` or `Owner` at the subscription level.
 
 ### 2. Verify access
 
