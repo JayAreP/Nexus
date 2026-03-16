@@ -1,46 +1,75 @@
-/* Nexus - Workflow Styles */
+/* Nexus — Workflow Styles (Mission Control) */
 
-/* Workflow Ladder */
+/* ─── Workflow Ladder ──────────────────────────────────── */
 .workflow-ladder {
-    margin: 20px 0;
+    margin: 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
 }
 
 .ladder-step {
     position: relative;
-    background: var(--card-bg);
-    border: 1px solid #e2e8f0;
-    padding: 16px;
-    margin-bottom: 0;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    transition: all var(--transition);
+    overflow: hidden;
 }
 
-.ladder-step + .ladder-connector {
+/* Left gradient accent bar */
+.ladder-step::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--accent);
+    opacity: 0.3;
+    transition: opacity var(--transition);
+}
+
+.ladder-step:hover {
+    border-color: var(--border-hover);
+    box-shadow: var(--shadow-sm), 0 0 20px rgba(249,115,22,0.03);
+}
+
+.ladder-step:hover::before {
+    opacity: 0.8;
+}
+
+.ladder-connector {
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 32px;
+    height: 36px;
     position: relative;
 }
 
 .ladder-connector::before {
     content: '';
     position: absolute;
-    width: 2px;
+    width: 1px;
     height: 100%;
-    background: #cbd5e0;
+    background: linear-gradient(to bottom, rgba(249,115,22,0.2), rgba(249,115,22,0.1));
     left: 50%;
     transform: translateX(-50%);
 }
 
 .ladder-connector::after {
-    content: '▼';
-    color: #cbd5e0;
-    font-size: 10px;
-    background: #f5f5f5;
-    padding: 2px 6px;
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
     position: relative;
     z-index: 1;
+    box-shadow: 0 0 8px rgba(249,115,22,0.3), 0 0 16px rgba(249,115,22,0.1);
 }
 
+/* ─── Step Header ─────────────────────────────────────── */
 .step-header {
     display: flex;
     justify-content: space-between;
@@ -49,70 +78,91 @@
 }
 
 .step-number {
-    display: inline-block;
-    width: 28px;
-    height: 28px;
-    line-height: 28px;
-    text-align: center;
-    background: #ff6600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    background: var(--accent);
     color: #fff;
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: 800;
     border-radius: 50%;
     margin-right: 10px;
+    flex-shrink: 0;
+    box-shadow: 0 2px 10px rgba(249,115,22,0.3);
+    font-family: 'Space Grotesk', sans-serif;
 }
 
 .step-type-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.7px;
     text-transform: uppercase;
+    font-family: 'Space Grotesk', sans-serif;
 }
 
+/* Language badges with unique identities */
 .badge-powershell {
-    background: #e0f2fe;
-    color: #0369a1;
+    background: rgba(56,189,248,0.1);
+    color: #38bdf8;
+    border: 1px solid rgba(56,189,248,0.2);
+    box-shadow: 0 0 8px rgba(56,189,248,0.06);
 }
 
 .badge-terraform {
-    background: #dbeafe;
-    color: #5b21b6;
+    background: rgba(168,85,247,0.1);
+    color: #c4b5fd;
+    border: 1px solid rgba(168,85,247,0.2);
+    box-shadow: 0 0 8px rgba(168,85,247,0.06);
 }
 
 .badge-python {
-    background: #fef3c7;
-    color: #92400e;
+    background: rgba(250,204,21,0.08);
+    color: #fde047;
+    border: 1px solid rgba(250,204,21,0.18);
+    box-shadow: 0 0 8px rgba(250,204,21,0.06);
 }
 
 .badge-shell {
-    background: #d1fae5;
-    color: #065f46;
+    background: rgba(16,185,129,0.1);
+    color: #6ee7b7;
+    border: 1px solid rgba(16,185,129,0.2);
+    box-shadow: 0 0 8px rgba(16,185,129,0.06);
 }
 
 .badge-webhook {
-    background: #fce7f3;
-    color: #9d174d;
+    background: rgba(244,114,182,0.1);
+    color: #f9a8d4;
+    border: 1px solid rgba(244,114,182,0.2);
+    box-shadow: 0 0 8px rgba(244,114,182,0.06);
 }
 
 .badge-filecheck {
-    background: #e0e7ff;
-    color: #3730a3;
+    background: rgba(129,140,248,0.1);
+    color: #a5b4fc;
+    border: 1px solid rgba(129,140,248,0.2);
+    box-shadow: 0 0 8px rgba(129,140,248,0.06);
 }
 
+/* ─── Step Body ───────────────────────────────────────── */
 .step-body {
-    padding-left: 38px;
+    padding-left: 36px;
 }
 
 .step-script {
     font-size: 13px;
     color: var(--text-primary);
     font-weight: 500;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
+    font-family: 'JetBrains Mono', monospace;
 }
 
+/* ─── KV Pairs ────────────────────────────────────────── */
 .kv-pair {
     display: flex;
     gap: 8px;
@@ -121,120 +171,161 @@
 }
 
 .kv-pair input {
-    padding: 6px 10px;
-    border: 1px solid #cbd5e0;
-    font-size: 13px;
-    font-family: inherit;
+    padding: 8px 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
     color: var(--text-primary);
-}
-
-.kv-pair input:focus {
     outline: none;
-    border-color: #ff6600;
+    transition: all var(--transition);
 }
 
-.kv-key {
-    width: 160px;
+.kv-pair input:hover { border-color: var(--border-hover); }
+.kv-pair input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow);
 }
 
-.kv-value {
-    flex: 1;
-}
+.kv-key   { width: 155px; }
+.kv-value { flex: 1; }
 
 .kv-remove {
     background: none;
     border: none;
-    color: #e53e3e;
+    color: var(--text-muted);
     cursor: pointer;
     font-size: 16px;
-    padding: 4px 8px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition);
+    line-height: 1;
 }
 
 .kv-remove:hover {
-    color: #c53030;
-}
-
-/* Storage Browse Modal */
-.browse-item {
-    display: flex;
-    align-items: center;
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 13px;
-    border-bottom: 1px solid #f0f0f0;
-    transition: background 0.1s;
-}
-
-.browse-item:hover {
-    background: #f7fafc;
-}
-
-.browse-item.browse-selected {
-    background: #ebf4ff;
-    border-left: 3px solid #ff6600;
-}
-
-.browse-item.browse-file {
-    cursor: default;
+    color: var(--error);
+    background: var(--error-bg);
 }
 
 .add-kv-btn {
-    background: none;
-    border: 1px dashed #cbd5e0;
-    color: var(--text-secondary);
-    padding: 4px 12px;
+    background: transparent;
+    border: 1px dashed rgba(255,255,255,0.08);
+    color: var(--text-muted);
+    padding: 6px 14px;
     font-size: 12px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    transition: all var(--transition);
     margin-top: 4px;
 }
 
 .add-kv-btn:hover {
-    border-color: #ff6600;
-    color: #ff6600;
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-subtle);
 }
 
-/* Output capture config */
+/* ─── Output Capture ──────────────────────────────────── */
 .output-capture {
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px dashed #e2e8f0;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--border);
 }
 
 .output-capture label {
-    font-size: 12px;
-    color: var(--text-secondary);
-    font-weight: 600;
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
+    font-family: 'Space Grotesk', sans-serif;
 }
 
-/* Workflow list cards */
-.workflow-card {
-    padding: 14px 16px;
-    margin-bottom: 8px;
-    background-color: #f7fafc;
-    border: 1px solid transparent;
+/* ─── Browse Modal ────────────────────────────────────── */
+.browse-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
     cursor: pointer;
-    transition: background 0.15s ease;
-    border-left: 3px solid transparent;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    transition: all var(--transition);
+    border-radius: 0;
+    color: var(--text-secondary);
+    gap: 8px;
+}
+
+.browse-item:hover {
+    background: rgba(249,115,22,0.03);
+    color: var(--text-primary);
+}
+
+.browse-item.browse-selected {
+    background: var(--accent-subtle);
+    color: var(--accent);
+    border-left: 3px solid var(--accent);
+    padding-left: 13px;
+}
+
+.browse-item.browse-file { cursor: default; }
+
+/* ─── Workflow Cards ──────────────────────────────────── */
+.workflow-card {
+    padding: 16px 20px;
+    margin-bottom: 8px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all var(--transition);
     display: flex;
     justify-content: space-between;
     align-items: center;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Left accent bar */
+.workflow-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity var(--transition);
 }
 
 .workflow-card:hover {
-    background-color: #edf2f7;
-    border-left-color: #ff6600;
+    background: var(--bg-overlay);
+    border-color: var(--border-accent);
+    box-shadow: 0 4px 20px rgba(249,115,22,0.08), 0 2px 10px rgba(249,115,22,0.04);
+    transform: translateY(-1px);
+}
+
+.workflow-card:hover::before {
+    opacity: 1;
 }
 
 .workflow-card h4 {
     margin: 0;
     color: var(--text-primary);
-    font-weight: 500;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
     font-size: 14px;
+    letter-spacing: -0.1px;
 }
 
 .workflow-card .step-count {
-    font-size: 12px;
-    color: var(--text-secondary);
+    font-size: 11px;
+    color: var(--text-muted);
+    background: rgba(255,255,255,0.03);
+    padding: 4px 12px;
+    border-radius: 99px;
+    border: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
 }

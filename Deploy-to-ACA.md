@@ -18,6 +18,65 @@ No Docker, no ACR, no local build required.
 
 ---
 
+## Prerequisite A — Create an Azure Service Principal
+
+Nexus uses a Service Principal to authenticate against Azure (blob storage, etc.). Run this once.
+
+```bash
+# Create the SP and assign Contributor role on the subscription
+# (scope it to a specific resource group instead if you prefer least-privilege)
+az ad sp create-for-rbac \
+  --name "nexus-sp" \
+  --role Contributor \
+  --scopes /subscriptions/<SUBSCRIPTION_ID>
+```
+
+Output:
+```json
+{
+  "appId":       "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",   ← AZURE_CLIENT_ID
+  "password":    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", ← AZURE_CLIENT_SECRET
+  "tenant":      "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"    ← AZURE_TENANT_ID
+}
+```
+
+> **Save these immediately** — the `password` is only shown once and cannot be retrieved later.
+
+If you already have a Service Principal and need to reset its secret:
+```bash
+az ad sp credential reset --name "nexus-sp"
+```
+
+---
+
+## Prerequisite B — Generate a NEXUS_CREDENTIAL_KEY
+
+`NEXUS_CREDENTIAL_KEY` is a stable encryption key used by Nexus to protect stored credentials. It should be a strong random string. Use any of these methods:
+
+**PowerShell:**
+```powershell
+-join ((65..90) + (97..122) + (48..57) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
+```
+
+**PowerShell (SHA256 of a passphrase — deterministic, easy to regenerate):**
+```powershell
+$phrase = "your-memorable-passphrase"
+$bytes  = [System.Text.Encoding]::UTF8.GetBytes($phrase)
+$hash   = [System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)
+[System.BitConverter]::ToString($hash).Replace('-','').ToLower()
+```
+
+**Bash / Linux:**
+```bash
+echo -n "your-memorable-passphrase" | sha256sum | awk '{print $1}'
+# or purely random:
+openssl rand -hex 32
+```
+
+> Use the **same value** every deployment — changing it will invalidate any credentials Nexus has stored in `/app/conf`.
+
+---
+
 ## Concepts: docker-compose vs Azure Container Apps
 
 | docker-compose concept        | ACA equivalent                                  |

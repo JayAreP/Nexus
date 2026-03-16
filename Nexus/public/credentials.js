@@ -28,14 +28,14 @@ async function loadCredentialList() {
             data.credentials.forEach(cred => {
                 const typeLabel = credentialTypes[cred.type] ? credentialTypes[cred.type].label : cred.type;
                 const card = document.createElement('div');
-                card.className = 'script-item';
+                card.className = 'feature-item';
                 card.innerHTML = `
                     <div>
-                        <span style="font-weight: 500; font-size: 13px;">${escHtml(cred.name)}</span>
-                        <span style="font-size: 11px; color: var(--text-secondary); margin-left: 8px;">${escHtml(typeLabel)}</span>
-                        ${cred.description ? `<span style="font-size: 11px; color: var(--text-secondary); margin-left: 8px;">— ${escHtml(cred.description)}</span>` : ''}
+                        <span class="feature-item-name">${escHtml(cred.name)}</span>
+                        <span class="feature-item-meta">${escHtml(typeLabel)}</span>
+                        ${cred.description ? `<span class="feature-item-desc">— ${escHtml(cred.description)}</span>` : ''}
                     </div>
-                    <div style="display: flex; gap: 6px;">
+                    <div class="feature-item-actions">
                         <button class="btn btn-secondary btn-sm" onclick="showCredentialHelp('${escHtml(cred.name)}', '${escHtml(cred.type)}')">Help</button>
                         <button class="btn btn-secondary btn-sm" onclick="editCredential('${escHtml(cred.name)}')">Edit</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteCredential('${escHtml(cred.name)}')">Delete</button>

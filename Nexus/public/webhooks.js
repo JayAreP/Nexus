@@ -12,13 +12,15 @@ async function loadWebhookList() {
             emptyEl.style.display = 'none';
             data.webhooks.forEach(wh => {
                 const card = document.createElement('div');
-                card.className = 'script-item';
+                card.className = 'feature-item';
                 card.innerHTML = `
                     <div>
-                        <span style="font-weight: 500; font-size: 13px;">${wh.name}</span>
-                        <span style="font-size: 11px; color: var(--text-secondary); margin-left: 8px;">${wh.authType === 'oauth' ? 'OAuth' : 'Direct'}</span>
+                        <span class="feature-item-name">${wh.name}</span>
+                        <span class="feature-item-meta">${wh.authType === 'oauth' ? 'OAuth' : 'Direct'}</span>
                     </div>
-                    <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${wh.name}')">Delete</button>
+                    <div class="feature-item-actions">
+                        <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${wh.name}')">Delete</button>
+                    </div>
                 `;
                 listEl.appendChild(card);
             });

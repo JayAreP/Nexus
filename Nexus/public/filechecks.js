@@ -12,14 +12,16 @@ async function loadFileCheckList() {
             emptyEl.style.display = 'none';
             data.filechecks.forEach(fc => {
                 const card = document.createElement('div');
-                card.className = 'script-item';
+                card.className = 'feature-item';
                 card.innerHTML = `
                     <div>
-                        <span style="font-weight: 500; font-size: 13px;">${fc.name}</span>
-                        <span style="font-size: 11px; color: var(--text-secondary); margin-left: 8px;">${fc.storageAccount}</span>
-                        <span style="font-size: 11px; color: var(--text-secondary); margin-left: 8px;">${fc.authType === 'sas' ? 'SAS' : 'RBAC'}</span>
+                        <span class="feature-item-name">${fc.name}</span>
+                        <span class="feature-item-meta">${fc.storageAccount}</span>
+                        <span class="feature-item-meta">${fc.authType === 'sas' ? 'SAS' : 'RBAC'}</span>
                     </div>
-                    <button class="btn btn-danger btn-sm" onclick="deleteFileCheck('${fc.name}')">Delete</button>
+                    <div class="feature-item-actions">
+                        <button class="btn btn-danger btn-sm" onclick="deleteFileCheck('${fc.name}')">Delete</button>
+                    </div>
                 `;
                 listEl.appendChild(card);
             });
