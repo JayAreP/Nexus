@@ -1,10 +1,97 @@
 # Nexus - Automation Sequencer
 
-Run it with Docker:
+## Quick Start (local build)
+
+This builds the image from source. For deploying the pre-published image from GHCR, see [Deploy-to-ACA.md](Deploy-to-ACA.md).
+
+### 1. Create your `.env` file
+
+Copy `.env.example` to `.env` and fill in your values:
+```
+AZURE_CLIENT_ID=your-client-id
+AZURE_CLIENT_SECRET=your-client-secret
+AZURE_TENANT_ID=your-tenant-id
+NEXUS_CREDENTIAL_KEY=your-base64-32-byte-key
+```
+
+See [Azure Setup](#azure-setup) below for how to create the service principal and generate the credential key.
+
+### 2. Create the conf directory
+
+```
+mkdir conf
+```
+
+### 3. Create a `docker-compose.yml`
+
+```yaml
+services:
+  nexus-web:
+    build: .
+    container_name: nexus-app
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./conf:/app/conf
+      - ./Scripts:/app/Scripts:ro
+      - nexus-ps-modules:/usr/local/share/powershell/Modules
+      - nexus-py-packages:/usr/local/lib/python3.10/dist-packages
+    environment:
+      - POWERSHELL_TELEMETRY_OPTOUT=1
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+      - NEXUS_CREDENTIAL_KEY=${NEXUS_CREDENTIAL_KEY}
+    restart: unless-stopped
+    networks:
+      - nexus-network
+
+networks:
+  nexus-network:
+    driver: bridge
+
+volumes:
+  nexus-ps-modules:
+  nexus-py-packages:
+```
+
+> **Note on volumes:**
+> - `./conf` — persists local config (`config.json`) across restarts
+> - `./Scripts` — mounted read-only so you can edit scripts without rebuilding
+> - `nexus-ps-modules` / `nexus-py-packages` — named volumes so installed modules survive container recreates
+
+### 4. Build and start
+
 ```
 docker-compose up -d --build
 ```
-Then open http://localhost:8082
+
+The first build takes several minutes (installs PS modules, Azure CLI, AWS CLI, GCloud CLI, Terraform).  
+Subsequent starts reuse the cached layers and are fast.
+
+### 5. Open the app
+
+```
+http://localhost:8082
+```
+
+Go to **Configuration** and enter your storage account name to initialise the blob containers.
+
+### Updating after code changes
+
+`./Scripts` is live-mounted — edits there take effect immediately with no restart needed.
+
+For changes to `Server.ps1` or `public/`:
+```
+docker-compose up -d --build
+```
+
+### Stopping / restarting
+
+```bash
+docker-compose down       # stop and remove containers (volumes preserved)
+docker-compose restart    # restart without rebuild
+```
 
 ## What it does
 
@@ -52,6 +139,73 @@ Only `conf/config.json` (storage account credentials) is stored locally.
 ## Stack
 
 Pode (PowerShell web framework), Az.Storage module, Docker, vanilla JS frontend.
+
+## Azure Setup
+
+### 1. Create a Service Principal
+
+```powershell
+az ad sp create-for-rbac --name "nexus-sp" --skip-assignment
+```
+
+Output:
+```json
+{
+  "appId":    "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",   ← AZURE_CLIENT_ID
+  "password": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", ← AZURE_CLIENT_SECRET
+  "tenant":   "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"    ← AZURE_TENANT_ID
+}
+```
+
+> Save the `password` immediately — it cannot be retrieved after creation.  
+> To reset later: `az ad sp credential reset --name "nexus-sp"`
+
+### 2. Assign Storage Roles
+
+Nexus only needs access to Azure Blob Storage. Assign these two roles on the **storage account** (not the subscription) to follow least-privilege:
+
+| Role | Purpose |
+|------|---------|
+| `Storage Blob Data Contributor` | Read, write, and delete blobs (workflows, scripts, logs, credentials) |
+| `Storage Blob Data Reader` | *(Optional)* Read-only access if you want a separate read account |
+
+```powershell
+# Get the service principal's object ID
+$spId = az ad sp show --id "<AZURE_CLIENT_ID>" --query id -o tsv
+
+# Assign Storage Blob Data Contributor on the storage account
+az role assignment create `
+  --assignee $spId `
+  --role "Storage Blob Data Contributor" `
+  --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>/providers/Microsoft.Storage/storageAccounts/<STORAGE_ACCOUNT_NAME>"
+```
+
+If you prefer to scope at the resource group level instead (simpler, slightly broader):
+
+```powershell
+az role assignment create `
+  --assignee $spId `
+  --role "Storage Blob Data Contributor" `
+  --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP>"
+```
+
+> **Note:** `Storage Blob Data Contributor` is sufficient for all Nexus operations. Do **not** assign `Contributor` or `Owner` at the subscription level — Nexus does not need control-plane access.
+
+### 3. Verify access
+
+```powershell
+az login --service-principal `
+  -u "<AZURE_CLIENT_ID>" `
+  -p "<AZURE_CLIENT_SECRET>" `
+  --tenant "<AZURE_TENANT_ID>"
+
+az storage blob list `
+  --account-name "<STORAGE_ACCOUNT_NAME>" `
+  --container-name "nexus-config" `
+  --auth-mode login
+```
+
+---
 
 ## Environment variables
 
