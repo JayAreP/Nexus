@@ -14,6 +14,7 @@ async function loadLogs(workflow) {
     const listEl = document.getElementById('logs-list');
     const emptyEl = document.getElementById('logs-empty');
     const clearControls = document.getElementById('logs-clear-controls');
+    const filterControls = document.getElementById('logs-filter-controls');
     listEl.innerHTML = '';
 
     try {
@@ -22,9 +23,16 @@ async function loadLogs(workflow) {
         if (data.success && data.logs && data.logs.length > 0) {
             emptyEl.style.display = 'none';
             clearControls.style.display = 'block';
+            filterControls.style.display = 'block';
             data.logs.forEach(log => {
                 const row = document.createElement('div');
                 row.className = 'log-file-row';
+                // Determine log type from filename
+                let logType = 'workflow';
+                if (log.name.endsWith('-output.log')) logType = 'output';
+                else if (log.name.endsWith('-information.log')) logType = 'information';
+                else if (log.name.endsWith('-error.log')) logType = 'error';
+                row.dataset.logType = logType;
                 row.innerHTML = `
                     <span class="log-file-name">${log.name}</span>
                     <span class="log-file-meta">${log.lastModified || ''}</span>
@@ -32,15 +40,30 @@ async function loadLogs(workflow) {
                 row.addEventListener('click', () => viewLogDetail(workflow, log.name));
                 listEl.appendChild(row);
             });
+            applyLogTypeFilter();
         } else {
             emptyEl.style.display = 'block';
             clearControls.style.display = 'none';
+            filterControls.style.display = 'none';
             emptyEl.querySelector('p').textContent = 'No logs found for this workflow.';
         }
     } catch (err) {
         showMessage('logs-message', 'error', 'Error: ' + err.message);
     }
 }
+
+function applyLogTypeFilter() {
+    const checked = new Set(
+        Array.from(document.querySelectorAll('.log-type-filter:checked')).map(cb => cb.value)
+    );
+    document.querySelectorAll('#logs-list .log-file-row').forEach(row => {
+        row.style.display = checked.has(row.dataset.logType) ? '' : 'none';
+    });
+}
+
+document.querySelectorAll('.log-type-filter').forEach(cb => {
+    cb.addEventListener('change', applyLogTypeFilter);
+});
 
 async function viewLogDetail(workflow, logName) {
     try {

@@ -408,11 +408,21 @@
                     </div>
 
                     <div id="logs-clear-controls" style="display: none; margin-bottom: 20px; padding: 12px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 6px;">
-                        <div style="display: flex; gap: 10px; align-items: center;">
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                             <span style="font-size: 13px; color: var(--text-secondary);">Clear logs older than</span>
                             <input type="number" id="logs-clear-days" min="1" max="365" value="30" style="width: 70px;">
                             <span style="font-size: 13px; color: var(--text-secondary);">days</span>
                             <button type="button" id="clear-old-logs-btn" class="btn btn-danger btn-sm">Clear</button>
+                        </div>
+                    </div>
+
+                    <div id="logs-filter-controls" style="display: none; margin-bottom: 16px;">
+                        <div style="display: flex; gap: 16px; align-items: center; font-size: 13px;">
+                            <span style="color: var(--text-secondary);">Show:</span>
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" class="log-type-filter" value="workflow" checked> Workflow</label>
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" class="log-type-filter" value="output" checked> Output</label>
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" class="log-type-filter" value="information" checked> Information</label>
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;"><input type="checkbox" class="log-type-filter" value="error" checked> Error</label>
                         </div>
                     </div>
 
