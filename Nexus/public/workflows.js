@@ -46,8 +46,9 @@ async function editWorkflow(name) {
             editingWorkflowName = name;
             currentWorkflow = data.workflow;
             document.getElementById('workflow-name').value = currentWorkflow.name;
+            document.getElementById('workflow-editor-title').textContent = `Edit: ${name}`;
             renderLadder();
-            document.getElementById('workflow-editor').style.display = 'block';
+            document.getElementById('workflow-editor').style.display = 'flex';
         }
     } catch (err) {
         showMessage('workflow-message', 'error', 'Error: ' + err.message);
@@ -70,11 +71,17 @@ document.getElementById('new-workflow-btn').addEventListener('click', () => {
     editingWorkflowName = null;
     currentWorkflow = { name: '', steps: [] };
     document.getElementById('workflow-name').value = '';
+    document.getElementById('workflow-editor-title').textContent = 'New Workflow';
     renderLadder();
-    document.getElementById('workflow-editor').style.display = 'block';
+    document.getElementById('workflow-editor').style.display = 'flex';
 });
 
 document.getElementById('cancel-workflow-btn').addEventListener('click', () => {
+    document.getElementById('workflow-editor').style.display = 'none';
+    editingWorkflowName = null;
+});
+
+document.getElementById('close-workflow-editor').addEventListener('click', () => {
     document.getElementById('workflow-editor').style.display = 'none';
     editingWorkflowName = null;
 });
@@ -101,6 +108,7 @@ document.getElementById('save-workflow-btn').addEventListener('click', async () 
             document.getElementById('workflow-editor').style.display = 'none';
             editingWorkflowName = null;
             loadWorkflowList();
+            loadWorkflowDropdowns();
         }
     } catch (err) {
         showMessage('workflow-message', 'error', 'Error: ' + err.message);

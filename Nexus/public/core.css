@@ -160,7 +160,7 @@ body::after {
 }
 
 .logo img {
-    height: 56px !important;
+    height: 84px !important;
     width: auto;
     filter: drop-shadow(0 0 20px rgba(249,115,22,0.2));
     transition: filter var(--transition-slow);
@@ -728,6 +728,11 @@ select:focus {
     background: var(--error-bg);
     color: var(--error);
     border-color: rgba(244,63,94,0.25);
+}
+
+.modal-wide {
+    max-width: 90vw;
+    width: 90vw;
 }
 
 /* ─── Script items ─────────────────────────────────────── */

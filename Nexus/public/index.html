@@ -21,7 +21,7 @@
         <!-- Side Navigation -->
         <nav class="sidebar">
             <div class="logo">
-                <img src="/static/nexuslogo.png" alt="Nexus" style="height: 80px; width: auto;">
+                <img src="/static/nexuslogo.png" alt="Nexus" style="height: 120px; width: auto;">
             </div>
             <ul class="nav-menu">
                 <li><a href="#" class="nav-link active" data-panel="workflows">
@@ -97,31 +97,7 @@
                         <p>No workflows yet. Click "+ New Workflow" to get started.</p>
                     </div>
 
-                    <!-- Workflow Editor (hidden until create/edit) -->
-                    <div id="workflow-editor" style="display: none; margin-top: 24px;">
-                        <div style="border-top: 1px solid var(--border); padding-top: 24px;">
-                            <div class="form-group">
-                                <label>Workflow Name</label>
-                                <input type="text" id="workflow-name" placeholder="e.g. Process Cost Data">
-                            </div>
-
-                            <div class="section-header" style="margin-top: 20px;">
-                                <h3>Steps</h3>
-                                <button type="button" id="add-step-btn" class="btn btn-secondary btn-sm">+ Add Step</button>
-                            </div>
-
-                            <div id="workflow-ladder" class="workflow-ladder"></div>
-
-                            <div id="ladder-empty" class="empty-state" style="margin-top: 12px;">
-                                <p>No steps added. Click "+ Add Step" to build your workflow ladder.</p>
-                            </div>
-
-                            <div class="form-actions" style="margin-top: 20px;">
-                                <button type="button" id="save-workflow-btn" class="btn btn-primary">Save Workflow</button>
-                                <button type="button" id="cancel-workflow-btn" class="btn btn-secondary">Cancel</button>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- Workflow Editor (opens in modal) -->
                 </div>
             </div>
 
@@ -572,6 +548,38 @@
             </div>
 
         </main>
+    </div>
+
+    <!-- Workflow Editor Modal -->
+    <div id="workflow-editor" class="modal" style="display: none;">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <h2 id="workflow-editor-title">New Workflow</h2>
+                <button class="modal-close" id="close-workflow-editor">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Workflow Name</label>
+                    <input type="text" id="workflow-name" placeholder="e.g. Process Cost Data">
+                </div>
+
+                <div class="section-header" style="margin-top: 20px;">
+                    <h3>Steps</h3>
+                    <button type="button" id="add-step-btn" class="btn btn-secondary btn-sm">+ Add Step</button>
+                </div>
+
+                <div id="workflow-ladder" class="workflow-ladder"></div>
+
+                <div id="ladder-empty" class="empty-state" style="margin-top: 12px;">
+                    <p>No steps added. Click "+ Add Step" to build your workflow ladder.</p>
+                </div>
+
+                <div class="form-actions" style="margin-top: 20px;">
+                    <button type="button" id="save-workflow-btn" class="btn btn-primary">Save Workflow</button>
+                    <button type="button" id="cancel-workflow-btn" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Add Step Modal -->
