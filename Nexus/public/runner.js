@@ -1,5 +1,15 @@
 // Nexus - Runner (run, live console, engine logs, schedules)
 
+// Colorize @@TAG@@ prefixed lines from the console temp file
+function colorizeConsole(text) {
+    if (!text) return '';
+    const safe = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return safe.replace(/^@@(HDR|CMD|OUT|INFO|ERR|VERBOSE)@@(.*)$/gm, (_, tag, content) => {
+        const cls = { HDR: 'con-hdr', CMD: 'con-cmd', OUT: 'con-out', INFO: 'con-info', ERR: 'con-err', VERBOSE: 'con-verbose' }[tag];
+        return `<span class="${cls}">${content}</span>`;
+    });
+}
+
 // ===== RUN / SCHEDULE =====
 async function loadWorkflowDropdowns() {
     try {
@@ -43,7 +53,7 @@ document.getElementById('run-workflow-btn').addEventListener('click', async () =
     showMessage('runner-message', 'info', `Starting workflow "${name}"...`);
 
     // Show console
-    consoleOut.textContent = 'Waiting for output...\n';
+    consoleOut.innerHTML = 'Waiting for output...\n';
     document.getElementById('live-console-title').textContent = `Console — ${name}`;
     consoleEl.classList.add('open');
     document.getElementById('live-console-backdrop').classList.add('active');
@@ -73,7 +83,7 @@ document.getElementById('run-workflow-btn').addEventListener('click', async () =
                 const cr = await fetch(`/api/workflows/${encodeURIComponent(name)}/console`);
                 const cd = await cr.json();
                 if (cd.output) {
-                    consoleOut.textContent = cd.output;
+                    consoleOut.innerHTML = colorizeConsole(cd.output);
                     consoleOut.scrollTop = consoleOut.scrollHeight;
                 }
                 if (!cd.running) {
@@ -147,7 +157,7 @@ document.getElementById('test-step-btn').addEventListener('click', async () => {
     btn.textContent = 'Running...';
     showMessage('runner-message', 'info', `Testing ${stepLabel} of "${name}"...`);
 
-    consoleOut.textContent = 'Waiting for output...\n';
+    consoleOut.innerHTML = 'Waiting for output...\n';
     document.getElementById('live-console-title').textContent = `Console — ${name} — ${stepLabel}`;
     consoleEl.classList.add('open');
     document.getElementById('live-console-backdrop').classList.add('active');
@@ -179,7 +189,7 @@ document.getElementById('test-step-btn').addEventListener('click', async () => {
             const cr = await fetch(`/api/workflows/${encodeURIComponent(name)}/console`);
             const cd = await cr.json();
             if (cd.output) {
-                consoleOut.textContent = cd.output;
+                consoleOut.innerHTML = colorizeConsole(cd.output);
                 consoleOut.scrollTop = consoleOut.scrollHeight;
             }
             if (!cd.running) {

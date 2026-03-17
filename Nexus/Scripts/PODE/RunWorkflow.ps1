@@ -60,8 +60,10 @@ $allInfo   = [System.Text.StringBuilder]::new()  # Write-Host / Information stre
 
 # Live console temp file — frontend polls this for real-time output
 $consoleTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-console-$($Name.ToLower()).log"
-$consoleHeader = if ($isSingleStep) { "========== TEST STEP $($StepIndex + 1): $logBaseName =========="  } else { "========== RUN: $logBaseName ==========" }
-[System.IO.File]::WriteAllText($consoleTempFile, "$consoleHeader`n`n", [System.Text.Encoding]::UTF8)
+$consoleHeader = if ($isSingleStep) { "========== TEST STEP $($StepIndex + 1): $logBaseName ==========" } else { "========== RUN: $logBaseName ==========" }
+[void]$allOutput.AppendLine("@@HDR@@$consoleHeader")
+[void]$allOutput.AppendLine("")
+[System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8)
 
 $capturedOutputs = @{}  # Variable store for output chaining between steps
 
@@ -85,9 +87,10 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
         error   = ''
     }
 
-    [void]$allOutput.AppendLine("=========================================")
-    [void]$allOutput.AppendLine("  $stepLabel")
-    [void]$allOutput.AppendLine("=========================================")
+    [void]$allOutput.AppendLine("@@HDR@@=========================================")
+    [void]$allOutput.AppendLine("@@HDR@@  $stepLabel")
+    [void]$allOutput.AppendLine("@@HDR@@=========================================")
+    [void]$allOutput.AppendLine("")
 
     # Update live console so user sees step header immediately
     try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
@@ -123,6 +126,7 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
         $stdOut = $null
         $stdErr = $null
         $stdInfo = $null
+        $stdVerbose = $null
 
         # Build human-readable command string for logging
         $commandStr = switch ($step.type) {
@@ -154,7 +158,7 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
         # Log command to console, engine log, and step log before execution
         if ($commandStr) {
             $stepLog.command = $commandStr
-            [void]$allOutput.AppendLine("  > $commandStr")
+            [void]$allOutput.AppendLine("@@CMD@@  > $commandStr")
             [void]$allOutput.AppendLine("")
             try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
             Write-EngineLog "STEP EXEC: '$Name' $stepLabel — $commandStr"
@@ -168,29 +172,37 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
                 $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-ps-$timestamp-$i.ps1"
                 try {
                     [System.IO.File]::WriteAllText($tempScript, $scriptContent, [System.Text.Encoding]::UTF8)
-                    # Capture stdout, stderr, and Information stream (Write-Host) separately
-                    $rawOutput = if ($params.Count -gt 0) {
-                        & $tempScript @params 6>&1 2>&1
-                    } else {
-                        & $tempScript 6>&1 2>&1
-                    }
-                    # Separate stdout, stderr, and Information stream
-                    $stdOutLines = @()
-                    $stdErrLines = @()
-                    $stdInfoLines = @()
-                    foreach ($line in $rawOutput) {
-                        if ($line -is [System.Management.Automation.ErrorRecord]) {
-                            $stdErrLines += $line.ToString()
-                        } elseif ($line -is [System.Management.Automation.InformationRecord]) {
-                            $stdInfoLines += $line.MessageData.ToString()
+                    # Stream stdout, stderr, information, and verbose line-by-line to the live console
+                    $stdOutLines     = @()
+                    $stdErrLines     = @()
+                    $stdInfoLines    = @()
+                    $stdVerboseLines = @()
+                    $streamBlock = {
+                        if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                            $stdErrLines += $_.ToString()
+                            [void]$allOutput.AppendLine("@@ERR@@$($_.ToString())")
+                        } elseif ($_ -is [System.Management.Automation.InformationRecord]) {
+                            $stdInfoLines += $_.MessageData.ToString()
+                            [void]$allOutput.AppendLine("@@INFO@@$($_.MessageData.ToString())")
+                        } elseif ($_ -is [System.Management.Automation.VerboseRecord]) {
+                            $stdVerboseLines += $_.Message
+                            [void]$allOutput.AppendLine("@@VERBOSE@@$($_.Message)")
                         } else {
-                            $stdOutLines += $line.ToString()
+                            $stdOutLines += $_.ToString()
+                            [void]$allOutput.AppendLine("@@OUT@@$($_.ToString())")
                         }
+                        try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
                     }
-                    $stdOut  = $stdOutLines  -join "`n"
-                    $stdErr  = $stdErrLines  -join "`n"
-                    $stdInfo = $stdInfoLines -join "`n"
-                    $output  = $stdOut
+                    if ($params.Count -gt 0) {
+                        & $tempScript @params 4>&1 6>&1 2>&1 | ForEach-Object $streamBlock
+                    } else {
+                        & $tempScript 4>&1 6>&1 2>&1 | ForEach-Object $streamBlock
+                    }
+                    $stdOut     = $stdOutLines     -join "`n"
+                    $stdErr     = $stdErrLines     -join "`n"
+                    $stdInfo    = $stdInfoLines    -join "`n"
+                    $stdVerbose = $stdVerboseLines -join "`n"
+                    $output     = $stdOut
                 } finally {
                     if (Test-Path $tempScript) { Remove-Item $tempScript -Force -ErrorAction SilentlyContinue }
                 }
@@ -218,15 +230,25 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
 
                     Push-Location $tfDir
                     try {
-                        $rawInit = terraform init -no-color 2>&1
-                        $rawApply = terraform apply -auto-approve -no-color 2>&1
-                        $stdOut = ($rawInit + $rawApply) | Out-String
+                        $stdOutLines = @()
+                        $tfStreamBlock = {
+                            $ln = $_.ToString()
+                            $stdOutLines += $ln
+                            [void]$allOutput.AppendLine("@@OUT@@$ln")
+                            try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+                        }
+                        terraform init -no-color 2>&1 | ForEach-Object $tfStreamBlock
+                        terraform apply -auto-approve -no-color 2>&1 | ForEach-Object $tfStreamBlock
+                        $stdOut = $stdOutLines -join "`n"
                         $output = $stdOut
 
                         try {
                             $tfOutputJson = terraform output -json 2>&1 | Out-String
                             $output += "`n--- Terraform Outputs ---`n$tfOutputJson"
                             $stdOut += "`n--- Terraform Outputs ---`n$tfOutputJson"
+                            [void]$allOutput.AppendLine("@@OUT@@--- Terraform Outputs ---")
+                            foreach ($ln in $tfOutputJson -split "`n") { [void]$allOutput.AppendLine("@@OUT@@$ln") }
+                            try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
                         } catch { }
                     } finally {
                         Pop-Location
@@ -249,15 +271,17 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
                         $argList += "--$key"
                         $argList += $params[$key]
                     }
-                    $rawOutput = & python3 @argList 2>&1
                     $stdOutLines = @()
                     $stdErrLines = @()
-                    foreach ($line in $rawOutput) {
-                        if ($line -is [System.Management.Automation.ErrorRecord]) {
-                            $stdErrLines += $line.ToString()
+                    & python3 @argList 2>&1 | ForEach-Object {
+                        if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                            $stdErrLines += $_.ToString()
+                            [void]$allOutput.AppendLine("@@ERR@@$($_.ToString())")
                         } else {
-                            $stdOutLines += $line.ToString()
+                            $stdOutLines += $_.ToString()
+                            [void]$allOutput.AppendLine("@@OUT@@$($_.ToString())")
                         }
+                        try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
                     }
                     $stdOut = $stdOutLines -join "`n"
                     $stdErr = $stdErrLines -join "`n"
@@ -279,15 +303,17 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
                     foreach ($key in $params.Keys) {
                         [System.Environment]::SetEnvironmentVariable($key, $params[$key])
                     }
-                    $rawOutput = & bash $tempScript 2>&1
                     $stdOutLines = @()
                     $stdErrLines = @()
-                    foreach ($line in $rawOutput) {
-                        if ($line -is [System.Management.Automation.ErrorRecord]) {
-                            $stdErrLines += $line.ToString()
+                    & bash $tempScript 2>&1 | ForEach-Object {
+                        if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                            $stdErrLines += $_.ToString()
+                            [void]$allOutput.AppendLine("@@ERR@@$($_.ToString())")
                         } else {
-                            $stdOutLines += $line.ToString()
+                            $stdOutLines += $_.ToString()
+                            [void]$allOutput.AppendLine("@@OUT@@$($_.ToString())")
                         }
+                        try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
                     }
                     $stdOut = $stdOutLines -join "`n"
                     $stdErr = $stdErrLines -join "`n"
@@ -329,6 +355,8 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
                 $response = Invoke-RestMethod -Method Post -Uri $wh.uri -Headers $headers -Body $bodyJson -ContentType 'application/json'
                 $stdOut = $response | ConvertTo-Json -Depth 10
                 $output = $stdOut
+                foreach ($ln in $stdOut -split "`n") { [void]$allOutput.AppendLine("@@OUT@@$ln") }
+                try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
             }
 
             'filecheck' {
@@ -380,7 +408,7 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
                 $deadline = $stepStartCheck.AddMinutes($timeoutMinutes)
                 $newFiles = @()
 
-                [void]$allOutput.AppendLine("  Polling $($fc.storageAccount)/$containerName/$prefix every 30s (timeout: ${timeoutMinutes}m)...")
+                [void]$allOutput.AppendLine("@@INFO@@  Polling $($fc.storageAccount)/$containerName/$prefix every 30s (timeout: ${timeoutMinutes}m)...")
                 try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
                 while ((Get-Date) -lt $deadline) {
@@ -393,7 +421,7 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
                             Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
                         }
                     } catch {
-                        [void]$allOutput.AppendLine("  Poll error: $($_.Exception.Message)")
+                        [void]$allOutput.AppendLine("@@ERR@@  Poll error: $($_.Exception.Message)")
                         try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
                         continue
                     }
@@ -410,12 +438,12 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
                     }
 
                     if ($newFiles.Count -gt 0) {
-                        [void]$allOutput.AppendLine("  Detected $($newFiles.Count) new/updated file(s)")
+                        [void]$allOutput.AppendLine("@@INFO@@  Detected $($newFiles.Count) new/updated file(s)")
                         break
                     }
 
                     $remaining = [math]::Round(($deadline - (Get-Date)).TotalSeconds)
-                    [void]$allOutput.AppendLine("  No changes yet... ${remaining}s remaining")
+                    [void]$allOutput.AppendLine("@@INFO@@  No changes yet... ${remaining}s remaining")
                     try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
                 }
 
@@ -427,11 +455,12 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
                 $resultObj = @{ files = $newFiles }
                 $stdOut = $resultObj | ConvertTo-Json -Depth 10
                 $output = $stdOut
+                foreach ($ln in $stdOut -split "`n") { [void]$allOutput.AppendLine("@@OUT@@$ln") }
+                try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
             }
         }
 
-        # Append step output to full log
-        if ($stdOut) { [void]$allOutput.AppendLine($stdOut) }
+        # Write remaining streams to blob logs (console was already updated live)
         if ($stdInfo) {
             [void]$allInfo.AppendLine("=========================================")
             [void]$allInfo.AppendLine("  $stepLabel")
@@ -568,11 +597,14 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
 
         [void]$allErrors.AppendLine("")
 
-        [void]$allOutput.AppendLine("FAILED: $($_.Exception.Message)")
+        [void]$allOutput.AppendLine("@@ERR@@FAILED: $($_.Exception.Message)")
+        if ($_.Exception.InnerException) {
+            [void]$allOutput.AppendLine("@@ERR@@  Inner: $($_.Exception.InnerException.Message)")
+        }
         if (![string]::IsNullOrWhiteSpace($stdErr)) {
             [void]$allOutput.AppendLine("")
-            [void]$allOutput.AppendLine("--- Script Errors ---")
-            [void]$allOutput.AppendLine($stdErr)
+            [void]$allOutput.AppendLine("@@ERR@@--- Script Error Stream ---")
+            foreach ($ln in $stdErr -split "`n") { [void]$allOutput.AppendLine("@@ERR@@$ln") }
         }
         [void]$allOutput.AppendLine("")
 
