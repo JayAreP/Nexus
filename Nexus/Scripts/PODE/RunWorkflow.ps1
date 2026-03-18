@@ -106,7 +106,25 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
         if ($step.params) {
             foreach ($kv in @($step.params)) {
                 if (![string]::IsNullOrWhiteSpace($kv.key)) {
-                    $params[$kv.key] = $kv.value
+                    # Handle array-typed parameters — value may be a JSON array or comma-separated string
+                    if ($kv.type -eq 'array') {
+                        if ($kv.value -is [array]) {
+                            $params[$kv.key] = @($kv.value)
+                        } elseif ($kv.value -is [string] -and $kv.value.Trim().StartsWith('[')) {
+                            # JSON array string from the UI, e.g. '["testvm02","testvm03"]'
+                            try {
+                                $params[$kv.key] = @($kv.value | ConvertFrom-Json)
+                            } catch {
+                                $params[$kv.key] = @($kv.value -split ',' | ForEach-Object { $_.Trim() })
+                            }
+                        } elseif ($kv.value -is [string] -and $kv.value -match ',') {
+                            $params[$kv.key] = @($kv.value -split ',' | ForEach-Object { $_.Trim() })
+                        } else {
+                            $params[$kv.key] = @($kv.value)
+                        }
+                    } else {
+                        $params[$kv.key] = $kv.value
+                    }
                 }
             }
         }
@@ -131,7 +149,13 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
         # Build human-readable command string for logging
         $commandStr = switch ($step.type) {
             'powershell' {
-                $paramStr = ($params.GetEnumerator() | ForEach-Object { "-$($_.Key) $($_.Value)" }) -join ' '
+                $paramStr = ($params.GetEnumerator() | ForEach-Object {
+                    if ($_.Value -is [array]) {
+                        "-$($_.Key) $($_.Value -join ',')"
+                    } else {
+                        "-$($_.Key) $($_.Value)"
+                    }
+                }) -join ' '
                 "& ./$($step.script)$(if ($paramStr) { " $paramStr" })"
             }
             'python' {

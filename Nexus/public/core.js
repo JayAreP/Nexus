@@ -147,6 +147,43 @@ document.getElementById('sandbox-reset-btn').addEventListener('click', async () 
     }
 });
 
+// NLS Help modal
+const nlsModal = document.getElementById('nls-help-modal');
+const nlsBody = document.getElementById('nls-help-body');
+let nlsLoaded = false;
+
+document.getElementById('nls-help-btn').addEventListener('click', async () => {
+    nlsModal.style.display = 'flex';
+    if (!nlsLoaded) {
+        try {
+            const r = await fetch('/static/nls-help.html');
+            nlsBody.innerHTML = await r.text();
+            nlsBody.querySelectorAll('.lang-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const group = tab.parentElement.dataset.group;
+                    const lang = tab.dataset.lang;
+                    tab.parentElement.querySelectorAll('.lang-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    nlsBody.querySelectorAll(`.lang-block[data-group="${group}"]`).forEach(b => {
+                        b.classList.toggle('active', b.dataset.lang === lang);
+                    });
+                });
+            });
+            nlsLoaded = true;
+        } catch (e) {
+            nlsBody.innerHTML = '<p style="color:var(--error)">Failed to load NLS help.</p>';
+        }
+    }
+});
+
+document.getElementById('close-nls-help').addEventListener('click', () => {
+    nlsModal.style.display = 'none';
+});
+
+nlsModal.addEventListener('click', (e) => {
+    if (e.target === nlsModal) nlsModal.style.display = 'none';
+});
+
 // ===== INIT =====
 let serverTimeOffset = 0;
 

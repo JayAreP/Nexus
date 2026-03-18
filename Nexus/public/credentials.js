@@ -37,6 +37,7 @@ async function loadCredentialList() {
                     </div>
                     <div class="feature-item-actions">
                         <button class="btn btn-secondary btn-sm" onclick="showCredentialHelp('${escHtml(cred.name)}', '${escHtml(cred.type)}')">Help</button>
+                        <button class="btn btn-secondary btn-sm" onclick="copyCredential('${escHtml(cred.name)}')">Copy</button>
                         <button class="btn btn-secondary btn-sm" onclick="editCredential('${escHtml(cred.name)}')">Edit</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteCredential('${escHtml(cred.name)}')">Delete</button>
                     </div>
@@ -58,6 +59,23 @@ async function deleteCredential(name) {
         const data = await r.json();
         showMessage('credentials-message', data.success ? 'success' : 'error', data.message);
         loadCredentialList();
+    } catch (err) {
+        showMessage('credentials-message', 'error', 'Error: ' + err.message);
+    }
+}
+
+async function copyCredential(name) {
+    const newName = prompt(`Copy "${name}" — enter new credential name:`, name + '-copy');
+    if (!newName || newName === name) return;
+    try {
+        const r = await fetch(`/api/credentials/${encodeURIComponent(name)}/copy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newName })
+        });
+        const data = await r.json();
+        showMessage('credentials-message', data.success ? 'success' : 'error', data.message);
+        if (data.success) loadCredentialList();
     } catch (err) {
         showMessage('credentials-message', 'error', 'Error: ' + err.message);
     }

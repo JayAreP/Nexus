@@ -24,6 +24,7 @@ async function loadWorkflowList() {
                     </div>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn btn-secondary btn-sm" onclick="openExportModal('${wf.name}')">Export</button>
+                        <button class="btn btn-secondary btn-sm" onclick="copyWorkflow('${wf.name}')">Copy</button>
                         <button class="btn btn-primary btn-sm" onclick="editWorkflow('${wf.name}')">Edit</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteWorkflow('${wf.name}')">Delete</button>
                     </div>
@@ -62,6 +63,23 @@ async function deleteWorkflow(name) {
         const data = await r.json();
         showMessage('workflow-message', data.success ? 'success' : 'error', data.message);
         loadWorkflowList();
+    } catch (err) {
+        showMessage('workflow-message', 'error', 'Error: ' + err.message);
+    }
+}
+
+async function copyWorkflow(name) {
+    const newName = prompt(`Copy "${name}" — enter new workflow name:`, name + '-copy');
+    if (!newName || newName === name) return;
+    try {
+        const r = await fetch(`/api/workflows/${encodeURIComponent(name)}/copy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newName })
+        });
+        const data = await r.json();
+        showMessage('workflow-message', data.success ? 'success' : 'error', data.message);
+        if (data.success) loadWorkflowList();
     } catch (err) {
         showMessage('workflow-message', 'error', 'Error: ' + err.message);
     }
@@ -147,7 +165,17 @@ function renderLadder() {
             const mandatoryIcon = kv.mandatory ? '<span title="Mandatory" style="position: absolute; left: -20px; color: #e53e3e; font-size: 14px;">⚠</span>' : '';
             const placeholder = kv.type || 'Value';
             let valueField;
-            if (kv.validateSet && kv.validateSet.length > 0) {
+            if (kv.type === 'array') {
+                // Multi-value array UI
+                const values = Array.isArray(kv.value) ? kv.value : (kv.value ? [kv.value] : ['']);
+                const entriesHtml = values.map((v, vi) => `
+                    <div class="array-entry">
+                        <input type="text" class="array-value" placeholder="Value ${vi + 1}" value="${escHtml(v || '')}">
+                        <button class="array-entry-remove" onclick="removeArrayEntry(${idx}, ${ki}, ${vi})" title="Remove">×</button>
+                    </div>
+                `).join('');
+                valueField = `<div class="array-values" data-array="true">${entriesHtml}<button class="array-add-btn" onclick="addArrayEntry(${idx}, ${ki})">+ Add</button></div>`;
+            } else if (kv.validateSet && kv.validateSet.length > 0) {
                 const opts = kv.validateSet.map(v => `<option value="${escHtml(v)}"${v === (kv.value || '') ? ' selected' : ''}>${escHtml(v)}</option>`).join('');
                 valueField = `<select class="kv-value" style="flex: 1; padding: 6px 10px; border: 1px solid #cbd5e0; font-size: 13px; font-family: inherit; color: var(--text-primary);"><option value="">-- select --</option>${opts}</select>`;
             } else {
@@ -162,7 +190,7 @@ function renderLadder() {
                 valueField = `<input type="text" class="kv-value" style="flex: 1;" placeholder="${escHtml(placeholder)}" value="${escHtml(kv.value || '')}">`;
             }
             kvHtml += `
-                <div class="kv-pair" data-kv-index="${ki}" style="position: relative;">
+                <div class="kv-pair${kv.type === 'array' ? ' kv-pair-array' : ''}" data-kv-index="${ki}" style="position: relative;">
                     ${mandatoryIcon}
                     <input type="text" class="kv-key" placeholder="Key" value="${escHtml(kv.key || '')}">
                     ${valueField}
@@ -248,8 +276,15 @@ function readLadderState() {
         currentWorkflow.steps[idx].params = [];
         kvPairs.forEach((kv, ki) => {
             const key = kv.querySelector('.kv-key').value.trim();
-            const value = kv.querySelector('.kv-value').value.trim();
             const old = oldParams[ki] || {};
+            // Read value — array params have multiple inputs
+            const arrayContainer = kv.querySelector('.array-values');
+            let value;
+            if (arrayContainer) {
+                value = Array.from(arrayContainer.querySelectorAll('.array-value')).map(el => el.value.trim()).filter(v => v);
+            } else {
+                value = kv.querySelector('.kv-value').value.trim();
+            }
             if (key) currentWorkflow.steps[idx].params.push({
                 key, value,
                 mandatory: !!old.mandatory,
@@ -290,6 +325,23 @@ function addKV(stepIdx) {
 function removeKV(stepIdx, kvIdx) {
     readLadderState();
     currentWorkflow.steps[stepIdx].params.splice(kvIdx, 1);
+    renderLadder();
+}
+
+function addArrayEntry(stepIdx, kvIdx) {
+    readLadderState();
+    const param = currentWorkflow.steps[stepIdx].params[kvIdx];
+    if (!Array.isArray(param.value)) param.value = param.value ? [param.value] : [];
+    param.value.push('');
+    renderLadder();
+}
+
+function removeArrayEntry(stepIdx, kvIdx, entryIdx) {
+    readLadderState();
+    const param = currentWorkflow.steps[stepIdx].params[kvIdx];
+    if (Array.isArray(param.value) && param.value.length > 1) {
+        param.value.splice(entryIdx, 1);
+    }
     renderLadder();
 }
 

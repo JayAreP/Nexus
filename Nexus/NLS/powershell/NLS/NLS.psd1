@@ -5,7 +5,7 @@
     Author            = 'Nexus'
     CompanyName       = 'Nexus Automation'
     Description       = 'NLS (Nexus Ladder Scheduler) - Client module for Nexus credential store and utilities'
-    FunctionsToExport = @('Get-NLSCredential', 'Set-NLSServer')
+    FunctionsToExport = @('Get-NLSCredential', 'Set-NLSServer', 'Copy-NLSScript', 'Get-NLSScript')
     CmdletsToExport   = @()
     VariablesToExport  = @()
     AliasesToExport    = @()

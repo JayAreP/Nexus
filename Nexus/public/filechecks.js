@@ -20,6 +20,7 @@ async function loadFileCheckList() {
                         <span class="feature-item-meta">${fc.authType === 'sas' ? 'SAS' : 'RBAC'}</span>
                     </div>
                     <div class="feature-item-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="copyFileCheck('${fc.name}')">Copy</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteFileCheck('${fc.name}')">Delete</button>
                     </div>
                 `;
@@ -40,6 +41,23 @@ async function deleteFileCheck(name) {
         const data = await r.json();
         showMessage('filechecks-message', data.success ? 'success' : 'error', data.message);
         loadFileCheckList();
+    } catch (err) {
+        showMessage('filechecks-message', 'error', 'Error: ' + err.message);
+    }
+}
+
+async function copyFileCheck(name) {
+    const newName = prompt(`Copy "${name}" — enter new file check name:`, name + '-copy');
+    if (!newName || newName === name) return;
+    try {
+        const r = await fetch(`/api/filechecks/${encodeURIComponent(name)}/copy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newName })
+        });
+        const data = await r.json();
+        showMessage('filechecks-message', data.success ? 'success' : 'error', data.message);
+        if (data.success) loadFileCheckList();
     } catch (err) {
         showMessage('filechecks-message', 'error', 'Error: ' + err.message);
     }

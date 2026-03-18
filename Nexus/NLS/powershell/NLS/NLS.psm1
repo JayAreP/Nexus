@@ -101,4 +101,106 @@ function Get-NLSCredential {
     }
 }
 
-Export-ModuleMember -Function Get-NLSCredential, Set-NLSServer
+function Copy-NLSScript {
+    <#
+    .SYNOPSIS
+        Copy a script from the Nexus script store to the sandbox workspace.
+    .PARAMETER ScriptName
+        The name of the script file to copy (e.g. createPostgresCopy.ps1).
+    .PARAMETER ScriptType
+        The type of script: PowerShell, Terraform, Python, or Shell.
+    .PARAMETER Destination
+        Optional destination directory. Defaults to /home/sandbox/workspace.
+    .EXAMPLE
+        Copy-NLSScript -ScriptName createPostgresCopy.ps1 -ScriptType PowerShell
+    .EXAMPLE
+        Copy-NLSScript -ScriptName deploy.tf -ScriptType Terraform -Destination /home/sandbox/workspace/tf
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$ScriptName,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('PowerShell', 'Terraform', 'Python', 'Shell')]
+        [string]$ScriptType,
+
+        [string]$Destination = '/home/sandbox/workspace'
+    )
+
+    $typeMap = @{
+        'PowerShell' = 'powershell'
+        'Terraform'  = 'terraform'
+        'Python'     = 'python'
+        'Shell'      = 'shell'
+    }
+    $apiType = $typeMap[$ScriptType]
+    $encodedName = [Uri]::EscapeDataString($ScriptName)
+    $url = "$($script:NexusBaseUrl)/api/scripts/$apiType/$encodedName/content"
+
+    try {
+        $response = Invoke-RestMethod -Uri $url -Method Get -ErrorAction Stop
+
+        if ($response.success -and $null -ne $response.content) {
+            if (-not (Test-Path $Destination)) {
+                New-Item -Path $Destination -ItemType Directory -Force | Out-Null
+            }
+            $outPath = Join-Path $Destination $ScriptName
+            [System.IO.File]::WriteAllText($outPath, $response.content, [System.Text.Encoding]::UTF8)
+            Write-Host "Copied '$ScriptName' to $outPath" -ForegroundColor Green
+            return $outPath
+        } else {
+            $msg = if ($response.message) { $response.message } else { "Script '$ScriptName' not found in $ScriptType store" }
+            throw $msg
+        }
+    } catch [Microsoft.PowerShell.Commands.HttpResponseException] {
+        throw "Failed to copy script '$ScriptName': $($_.Exception.Message)"
+    }
+}
+
+function Get-NLSScript {
+    <#
+    .SYNOPSIS
+        List available scripts in the Nexus script store.
+    .PARAMETER ScriptType
+        The type of scripts to list: PowerShell, Terraform, Python, or Shell.
+    .EXAMPLE
+        Get-NLSScript -ScriptType PowerShell
+    .EXAMPLE
+        Get-NLSScript -ScriptType Terraform | Where-Object { $_.name -like '*deploy*' }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('PowerShell', 'Terraform', 'Python', 'Shell')]
+        [string]$ScriptType
+    )
+
+    $typeMap = @{
+        'PowerShell' = 'powershell'
+        'Terraform'  = 'terraform'
+        'Python'     = 'python'
+        'Shell'      = 'shell'
+    }
+    $apiType = $typeMap[$ScriptType]
+    $url = "$($script:NexusBaseUrl)/api/scripts/$apiType"
+
+    try {
+        $response = Invoke-RestMethod -Uri $url -Method Get -ErrorAction Stop
+
+        if ($response.success -and $response.scripts) {
+            return @($response.scripts | ForEach-Object {
+                [PSCustomObject]@{
+                    Name         = $_.name
+                    Size         = $_.size
+                    LastModified = $_.lastModified
+                }
+            })
+        }
+        return @()
+    } catch {
+        throw "Failed to list $ScriptType scripts from Nexus: $($_.Exception.Message)"
+    }
+}
+
+Export-ModuleMember -Function Get-NLSCredential, Set-NLSServer, Copy-NLSScript, Get-NLSScript

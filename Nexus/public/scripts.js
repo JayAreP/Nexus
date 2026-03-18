@@ -140,6 +140,7 @@ async function loadScripts() {
                     <div style="display: flex; gap: 6px;">
                         <button class="btn btn-secondary btn-sm" onclick="editScript('${currentScriptType}', '${s.name}')">Edit</button>
                         <button class="btn btn-secondary btn-sm" onclick="previewScript('${currentScriptType}', '${s.name}')">Preview</button>
+                        <button class="btn btn-secondary btn-sm" onclick="copyScript('${currentScriptType}', '${s.name}')">Copy</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteScript('${currentScriptType}', '${s.name}')">Delete</button>
                     </div>
                 `;
@@ -160,6 +161,23 @@ async function deleteScript(type, name) {
         const data = await r.json();
         showMessage('scripts-message', data.success ? 'success' : 'error', data.message);
         loadScripts();
+    } catch (err) {
+        showMessage('scripts-message', 'error', 'Error: ' + err.message);
+    }
+}
+
+async function copyScript(type, name) {
+    const newName = prompt(`Copy "${name}" — enter new filename:`, name);
+    if (!newName || newName === name) return;
+    try {
+        const r = await fetch(`/api/scripts/${type}/${encodeURIComponent(name)}/copy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newName })
+        });
+        const data = await r.json();
+        showMessage('scripts-message', data.success ? 'success' : 'error', data.message);
+        if (data.success) loadScripts();
     } catch (err) {
         showMessage('scripts-message', 'error', 'Error: ' + err.message);
     }

@@ -19,6 +19,7 @@ async function loadWebhookList() {
                         <span class="feature-item-meta">${wh.authType === 'oauth' ? 'OAuth' : 'Direct'}</span>
                     </div>
                     <div class="feature-item-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="copyWebhook('${wh.name}')">Copy</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteWebhook('${wh.name}')">Delete</button>
                     </div>
                 `;
@@ -39,6 +40,23 @@ async function deleteWebhook(name) {
         const data = await r.json();
         showMessage('webhooks-message', data.success ? 'success' : 'error', data.message);
         loadWebhookList();
+    } catch (err) {
+        showMessage('webhooks-message', 'error', 'Error: ' + err.message);
+    }
+}
+
+async function copyWebhook(name) {
+    const newName = prompt(`Copy "${name}" — enter new webhook name:`, name + '-copy');
+    if (!newName || newName === name) return;
+    try {
+        const r = await fetch(`/api/webhooks/${encodeURIComponent(name)}/copy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newName })
+        });
+        const data = await r.json();
+        showMessage('webhooks-message', data.success ? 'success' : 'error', data.message);
+        if (data.success) loadWebhookList();
     } catch (err) {
         showMessage('webhooks-message', 'error', 'Error: ' + err.message);
     }

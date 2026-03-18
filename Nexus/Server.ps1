@@ -284,9 +284,12 @@ Start-PodeServer -Threads 4 {
     Add-PodeRoute -Method Post -Path '/api/sandbox/reset' -ScriptBlock {
         try {
             $workspacePath = '/home/sandbox/workspace'
+
+            # Clear workspace contents
             if (Test-Path $workspacePath) {
                 Get-ChildItem -Path $workspacePath -Force | Remove-Item -Recurse -Force
             }
+
             Write-PodeJsonResponse -Value @{ success = $true; message = 'Sandbox workspace has been reset' }
         } catch {
             Write-PodeJsonResponse -Value @{ success = $false; message = "Reset failed: $($_.Exception.Message)" }
@@ -467,6 +470,29 @@ Start-PodeServer -Threads 4 {
         }
     }
 
+    # Copy a script to a new name
+    Add-PodeRoute -Method Post -Path '/api/scripts/:type/:name/copy' -ScriptBlock {
+        $scriptType = $WebEvent.Parameters['type']
+        $scriptName = $WebEvent.Parameters['name']
+        $newName = $WebEvent.Data.newName
+        $container = "nexus-$scriptType"
+        if ([string]::IsNullOrWhiteSpace($newName)) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'New name is required' } -StatusCode 400
+            return
+        }
+        try {
+            $content = Read-Blob -Container $container -BlobPath $scriptName
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Script '$scriptName' not found" } -StatusCode 404
+                return
+            }
+            Write-Blob -Container $container -BlobPath $newName -Content $content
+            Write-PodeJsonResponse -Value @{ success = $true; message = "Script copied to '$newName'" }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
     # ===== WEBHOOK CONFIG ROUTES =====
 
     Add-PodeRoute -Method Get -Path '/api/webhooks' -ScriptBlock {
@@ -519,6 +545,29 @@ Start-PodeServer -Threads 4 {
         }
     }
 
+    # Copy a webhook to a new name
+    Add-PodeRoute -Method Post -Path '/api/webhooks/:name/copy' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        $newName = $WebEvent.Data.newName
+        if ([string]::IsNullOrWhiteSpace($newName)) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'New name is required' } -StatusCode 400
+            return
+        }
+        try {
+            $content = Read-Blob -Container 'nexus-webhooks' -BlobPath "$name.json"
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Webhook '$name' not found" } -StatusCode 404
+                return
+            }
+            $obj = $content | ConvertFrom-Json
+            $obj.name = $newName
+            Write-Blob -Container 'nexus-webhooks' -BlobPath "$newName.json" -Content ($obj | ConvertTo-Json -Depth 10)
+            Write-PodeJsonResponse -Value @{ success = $true; message = "Webhook copied to '$newName'" }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
     # ===== FILE CHECK CONFIG ROUTES =====
 
     Add-PodeRoute -Method Get -Path '/api/filechecks' -ScriptBlock {
@@ -566,6 +615,29 @@ Start-PodeServer -Threads 4 {
         try {
             Remove-Blob -Container 'nexus-config' -BlobPath "filechecks/$name.json"
             Write-PodeJsonResponse -Value @{ success = $true; message = "File Check '$name' deleted" }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Copy a file check to a new name
+    Add-PodeRoute -Method Post -Path '/api/filechecks/:name/copy' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        $newName = $WebEvent.Data.newName
+        if ([string]::IsNullOrWhiteSpace($newName)) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'New name is required' } -StatusCode 400
+            return
+        }
+        try {
+            $content = Read-Blob -Container 'nexus-config' -BlobPath "filechecks/$name.json"
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "File Check '$name' not found" } -StatusCode 404
+                return
+            }
+            $obj = $content | ConvertFrom-Json
+            $obj.name = $newName
+            Write-Blob -Container 'nexus-config' -BlobPath "filechecks/$newName.json" -Content ($obj | ConvertTo-Json -Depth 10)
+            Write-PodeJsonResponse -Value @{ success = $true; message = "File Check copied to '$newName'" }
         } catch {
             Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
         }
@@ -716,6 +788,29 @@ Start-PodeServer -Threads 4 {
         }
     }
 
+    # Copy a credential to a new name
+    Add-PodeRoute -Method Post -Path '/api/credentials/:name/copy' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        $newName = $WebEvent.Data.newName
+        if ([string]::IsNullOrWhiteSpace($newName)) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'New name is required' } -StatusCode 400
+            return
+        }
+        try {
+            $content = Read-Blob -Container 'nexus-credentials' -BlobPath "$name.json"
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Credential '$name' not found" } -StatusCode 404
+                return
+            }
+            $obj = $content | ConvertFrom-Json
+            $obj.name = $newName
+            Write-Blob -Container 'nexus-credentials' -BlobPath "$newName.json" -Content ($obj | ConvertTo-Json -Depth 10)
+            Write-PodeJsonResponse -Value @{ success = $true; message = "Credential copied to '$newName'" }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
     # Resolve credential — returns decrypted values (for script/API consumption)
     Add-PodeRoute -Method Get -Path '/api/credentials/:name/resolve' -ScriptBlock {
         $name = $WebEvent.Parameters['name']
@@ -817,6 +912,29 @@ Start-PodeServer -Threads 4 {
             } else {
                 Write-PodeJsonResponse -Value $result
             }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Copy a workflow to a new name
+    Add-PodeRoute -Method Post -Path '/api/workflows/:name/copy' -ScriptBlock {
+        $name = $WebEvent.Parameters['name']
+        $newName = $WebEvent.Data.newName
+        if ([string]::IsNullOrWhiteSpace($newName)) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'New name is required' } -StatusCode 400
+            return
+        }
+        try {
+            $content = Read-Blob -Container 'nexus-config' -BlobPath "workflows/$name.json"
+            if (-not $content) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = "Workflow '$name' not found" } -StatusCode 404
+                return
+            }
+            $obj = $content | ConvertFrom-Json
+            $obj.name = $newName
+            Write-Blob -Container 'nexus-config' -BlobPath "workflows/$newName.json" -Content ($obj | ConvertTo-Json -Depth 20)
+            Write-PodeJsonResponse -Value @{ success = $true; message = "Workflow copied to '$newName'" }
         } catch {
             Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
         }

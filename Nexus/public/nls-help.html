@@ -1,0 +1,194 @@
+<div class="nls-help">
+<style>
+.nls-help { font-size: 14px; color: var(--text-primary); line-height: 1.6; }
+.nls-help h2 { color: var(--accent); font-size: 18px; margin: 24px 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.nls-help h2:first-child { margin-top: 0; }
+.nls-help h3 { color: var(--text-primary); font-size: 15px; margin: 18px 0 8px; }
+.nls-help code { background: var(--bg-overlay); padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+.nls-help pre { background: var(--bg-overlay); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin: 8px 0 16px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.5; }
+.nls-help pre code { background: none; padding: 0; }
+.nls-help .lang-tab { display: inline-block; padding: 4px 14px; font-size: 12px; font-weight: 600; border-radius: 6px 6px 0 0; cursor: pointer; color: var(--text-secondary); border: 1px solid var(--border); border-bottom: none; margin-right: 4px; background: var(--bg-surface); }
+.nls-help .lang-tab.active { background: var(--bg-overlay); color: var(--accent); }
+.nls-help .lang-block { display: none; }
+.nls-help .lang-block.active { display: block; }
+.nls-help table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 13px; }
+.nls-help th { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-hover); color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.nls-help td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.nls-help td code { font-size: 12px; }
+.nls-help .param-req { color: var(--error); font-weight: 600; }
+.nls-help .param-opt { color: var(--text-muted); }
+</style>
+
+<h2>NLS Module Reference</h2>
+<p>The <strong>NLS</strong> (Nexus Ladder Scheduler) module is pre-installed in the sandbox and available to all workflow scripts. It provides access to the Nexus credential store and script library.</p>
+
+<!-- ──────── set_server ──────── -->
+<h2>Set Server URL</h2>
+<p>Override the Nexus server URL. Defaults to <code>http://localhost:8080</code> or the <code>NEXUS_SERVER_URL</code> environment variable. You typically don't need this inside the container.</p>
+
+<div class="lang-tabs" data-group="setserver">
+    <span class="lang-tab active" data-lang="ps">PowerShell</span>
+    <span class="lang-tab" data-lang="py">Python</span>
+</div>
+<div class="lang-block active" data-group="setserver" data-lang="ps">
+<pre><code>Set-NLSServer -Url 'http://nexus-app:8080'</code></pre>
+</div>
+<div class="lang-block" data-group="setserver" data-lang="py">
+<pre><code>import nls
+nls.set_server("http://nexus-app:8080")</code></pre>
+</div>
+
+<!-- ──────── get_credential ──────── -->
+<h2>Get Credential</h2>
+<p>Retrieve credentials from the Nexus credential store with all secret fields decrypted.</p>
+
+<div class="lang-tabs" data-group="getcred">
+    <span class="lang-tab active" data-lang="ps">PowerShell</span>
+    <span class="lang-tab" data-lang="py">Python</span>
+</div>
+<div class="lang-block active" data-group="getcred" data-lang="ps">
+<pre><code># List all credentials (metadata only)
+Get-NLSCredential
+
+# Get a specific credential (decrypted)
+$creds = Get-NLSCredential -Name 'prod-db-login'
+$creds.username   # 'dbadmin'
+$creds.password   # 'supersecret'
+
+# Return as PSCustomObject instead of hashtable
+$creds = Get-NLSCredential -Name 'prod-db-login' -AsObject</code></pre>
+
+<table>
+    <tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>-Name</code></td><td>String</td><td class="param-opt">No</td><td>Credential name. Omit to list all.</td></tr>
+    <tr><td><code>-AsObject</code></td><td>Switch</td><td class="param-opt">No</td><td>Return PSCustomObject instead of hashtable.</td></tr>
+</table>
+</div>
+<div class="lang-block" data-group="getcred" data-lang="py">
+<pre><code>import nls
+
+# Get a specific credential (decrypted)
+creds = nls.get_credential("prod-db-login")
+print(creds["username"])   # 'dbadmin'
+print(creds["password"])   # 'supersecret'
+
+# Use with boto3
+aws = nls.get_credential("aws-production")
+import boto3
+session = boto3.Session(
+    aws_access_key_id=aws["accessKeyId"],
+    aws_secret_access_key=aws["secretAccessKey"],
+)</code></pre>
+
+<table>
+    <tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>name</code></td><td>str</td><td class="param-req">Yes</td><td>Credential name to retrieve.</td></tr>
+</table>
+</div>
+
+<!-- ──────── get_scripts ──────── -->
+<h2>List Scripts</h2>
+<p>List available scripts in the Nexus script store by type.</p>
+
+<div class="lang-tabs" data-group="getscripts">
+    <span class="lang-tab active" data-lang="ps">PowerShell</span>
+    <span class="lang-tab" data-lang="py">Python</span>
+</div>
+<div class="lang-block active" data-group="getscripts" data-lang="ps">
+<pre><code># List all PowerShell scripts
+Get-NLSScript -ScriptType PowerShell
+
+# Filter results
+Get-NLSScript -ScriptType Terraform | Where-Object { $_.Name -like '*deploy*' }</code></pre>
+
+<table>
+    <tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>-ScriptType</code></td><td>String</td><td class="param-req">Yes</td><td><code>PowerShell</code>, <code>Terraform</code>, <code>Python</code>, or <code>Shell</code></td></tr>
+</table>
+
+<p>Returns objects with: <code>Name</code>, <code>Size</code>, <code>LastModified</code></p>
+</div>
+<div class="lang-block" data-group="getscripts" data-lang="py">
+<pre><code>import nls
+
+# List all PowerShell scripts
+scripts = nls.get_scripts("powershell")
+for s in scripts:
+    print(f"{s['name']}  ({s['size']} bytes)")
+
+# List terraform scripts
+nls.get_scripts("terraform")</code></pre>
+
+<table>
+    <tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>script_type</code></td><td>str</td><td class="param-req">Yes</td><td><code>"powershell"</code>, <code>"terraform"</code>, <code>"python"</code>, or <code>"shell"</code></td></tr>
+</table>
+
+<p>Returns a list of dicts with keys: <code>name</code>, <code>size</code>, <code>lastModified</code></p>
+</div>
+
+<!-- ──────── copy_script ──────── -->
+<h2>Copy Script</h2>
+<p>Download a script from the Nexus script store to the sandbox workspace (or a custom directory).</p>
+
+<div class="lang-tabs" data-group="copyscript">
+    <span class="lang-tab active" data-lang="ps">PowerShell</span>
+    <span class="lang-tab" data-lang="py">Python</span>
+</div>
+<div class="lang-block active" data-group="copyscript" data-lang="ps">
+<pre><code># Copy to default workspace
+Copy-NLSScript -ScriptName 'createPostgresCopy.ps1' -ScriptType PowerShell
+
+# Copy to a subdirectory
+Copy-NLSScript -ScriptName 'main.tf' -ScriptType Terraform -Destination '/home/sandbox/workspace/infra'</code></pre>
+
+<table>
+    <tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>-ScriptName</code></td><td>String</td><td class="param-req">Yes</td><td>Filename of the script to copy.</td></tr>
+    <tr><td><code>-ScriptType</code></td><td>String</td><td class="param-req">Yes</td><td><code>PowerShell</code>, <code>Terraform</code>, <code>Python</code>, or <code>Shell</code></td></tr>
+    <tr><td><code>-Destination</code></td><td>String</td><td class="param-opt">No</td><td>Target directory. Default: <code>/home/sandbox/workspace</code></td></tr>
+</table>
+
+<p>Returns the full path of the copied file.</p>
+</div>
+<div class="lang-block" data-group="copyscript" data-lang="py">
+<pre><code>import nls
+
+# Copy to default workspace
+path = nls.copy_script("createPostgresCopy.ps1", "powershell")
+print(f"Saved to {path}")
+
+# Copy to a subdirectory
+path = nls.copy_script("main.tf", "terraform", destination="/home/sandbox/workspace/infra")</code></pre>
+
+<table>
+    <tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>script_name</code></td><td>str</td><td class="param-req">Yes</td><td>Filename of the script to copy.</td></tr>
+    <tr><td><code>script_type</code></td><td>str</td><td class="param-req">Yes</td><td><code>"powershell"</code>, <code>"terraform"</code>, <code>"python"</code>, or <code>"shell"</code></td></tr>
+    <tr><td><code>destination</code></td><td>str</td><td class="param-opt">No</td><td>Target directory. Default: <code>/home/sandbox/workspace</code></td></tr>
+</table>
+
+<p>Returns the full path string of the copied file.</p>
+</div>
+
+<!-- ──────── quick reference ──────── -->
+<h2>Quick Reference</h2>
+
+<h3>PowerShell</h3>
+<pre><code>Import-Module NLS               # auto-loaded in the sandbox
+
+Set-NLSServer -Url '...'
+Get-NLSCredential [-Name '...'] [-AsObject]
+Get-NLSScript -ScriptType PowerShell|Terraform|Python|Shell
+Copy-NLSScript -ScriptName '...' -ScriptType PowerShell|Terraform|Python|Shell [-Destination '...']</code></pre>
+
+<h3>Python</h3>
+<pre><code>import nls
+
+nls.set_server("...")
+creds = nls.get_credential("name")
+scripts = nls.get_scripts("powershell")
+path = nls.copy_script("file.ps1", "powershell")</code></pre>
+
+
+</div>
