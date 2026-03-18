@@ -15,6 +15,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/hcl.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -24,7 +25,11 @@
                 <img src="/static/nexuslogo.png" alt="Nexus" style="height: 120px; width: auto;">
             </div>
             <ul class="nav-menu">
-                <li><a href="#" class="nav-link active" data-panel="workflows">
+                <li><a href="#" class="nav-link active" data-panel="dashboard">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                    <span>Dashboard</span>
+                </a></li>
+                <li><a href="#" class="nav-link" data-panel="workflows">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
                     <span>Workflows</span>
                 </a></li>
@@ -75,8 +80,139 @@
         <!-- Main Content Area -->
         <main class="main-content">
 
+            <!-- ===== DASHBOARD PANEL ===== -->
+            <div id="dashboard-panel" class="panel active">
+                <div class="panel-header">
+                    <h1>Dashboard</h1>
+                    <p>Overview of your Nexus automation environment</p>
+                </div>
+                <div class="panel-body">
+                    <div id="dashboard-message" class="message"></div>
+
+                    <!-- Running Jobs -->
+                    <div class="dash-section">
+                        <div class="dash-running-banner">
+                            <div class="dash-running-header">
+                                <h3>Running Jobs</h3>
+                                <span class="dash-badge" id="dash-running-count">0</span>
+                            </div>
+                            <div id="dash-running-list"><span class="text-muted">No jobs running</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Resource Summary Cards -->
+                    <div class="dash-section">
+                        <h3>Resources</h3>
+                        <div class="dash-cards">
+                            <div class="dash-card" onclick="navigateToPanel('workflows')">
+                                <div class="dash-card-value" id="dash-workflows">—</div>
+                                <div class="dash-card-label">Workflows</div>
+                            </div>
+                            <div class="dash-card" onclick="navigateToPanel('scripts')">
+                                <div class="dash-card-value" id="dash-scripts">—</div>
+                                <div class="dash-card-label">Scripts</div>
+                            </div>
+                            <div class="dash-card" onclick="navigateToPanel('runner')">
+                                <div class="dash-card-value" id="dash-schedules">—</div>
+                                <div class="dash-card-label">Schedules</div>
+                            </div>
+                            <div class="dash-card" onclick="navigateToPanel('webhooks')">
+                                <div class="dash-card-value" id="dash-webhooks">—</div>
+                                <div class="dash-card-label">Webhooks</div>
+                            </div>
+                            <div class="dash-card" onclick="navigateToPanel('filechecks')">
+                                <div class="dash-card-value" id="dash-filechecks">—</div>
+                                <div class="dash-card-label">File Checks</div>
+                            </div>
+                            <div class="dash-card" onclick="navigateToPanel('credentials')">
+                                <div class="dash-card-value" id="dash-credentials">—</div>
+                                <div class="dash-card-label">Credentials</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 24h Stats -->
+                    <div class="dash-section">
+                        <h3>Last 24 Hours</h3>
+                        <div class="dash-stats-row">
+                            <div class="dash-stat">
+                                <span class="dash-stat-value" id="dash-24h-total">—</span>
+                                <span class="dash-stat-label">Total Runs</span>
+                            </div>
+                            <div class="dash-stat dash-stat-success">
+                                <span class="dash-stat-value" id="dash-24h-success">—</span>
+                                <span class="dash-stat-label">Succeeded</span>
+                            </div>
+                            <div class="dash-stat dash-stat-failed">
+                                <span class="dash-stat-value" id="dash-24h-failed">—</span>
+                                <span class="dash-stat-label">Failed</span>
+                            </div>
+                            <div class="dash-stat">
+                                <span class="dash-stat-value" id="dash-24h-rate">—</span>
+                                <span class="dash-stat-label">Success Rate</span>
+                            </div>
+                            <div class="dash-stat">
+                                <span class="dash-stat-value" id="dash-24h-avg">—</span>
+                                <span class="dash-stat-label">Avg Duration</span>
+                            </div>
+                            <div class="dash-stat">
+                                <span class="dash-stat-value" id="dash-24h-longest" style="font-size: 14px;">—</span>
+                                <span class="dash-stat-label">Longest Run</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Charts Row -->
+                    <div class="dash-section">
+                        <div class="dash-charts-row">
+                            <div class="dash-chart-box">
+                                <h3>Success Rate</h3>
+                                <div class="dash-chart-container">
+                                    <canvas id="dash-donut-chart"></canvas>
+                                </div>
+                            </div>
+                            <div class="dash-chart-box dash-chart-wide">
+                                <h3>7-Day Trend</h3>
+                                <div class="dash-chart-container">
+                                    <canvas id="dash-trend-chart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Leaderboards -->
+                    <div class="dash-section">
+                        <div class="dash-grid-2">
+                            <div class="dash-board">
+                                <h3>Most Run (30d)</h3>
+                                <div id="dash-most-run"><span class="text-muted">No data</span></div>
+                            </div>
+                            <div class="dash-board">
+                                <h3>Most Failing (30d)</h3>
+                                <div id="dash-most-failing"><span class="text-muted">No data</span></div>
+                            </div>
+                            <div class="dash-board">
+                                <h3>Slowest Workflows (30d)</h3>
+                                <div id="dash-slowest"><span class="text-muted">No data</span></div>
+                            </div>
+                            <div class="dash-board">
+                                <h3>Recent Failures</h3>
+                                <div id="dash-recent-failures"><span class="text-muted">No data</span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step Type Stats -->
+                    <div class="dash-section">
+                        <h3>Step Type Breakdown (30d)</h3>
+                        <div id="dash-step-stats"><span class="text-muted">No data</span></div>
+                    </div>
+
+                </div>
+            </div>
+
             <!-- ===== WORKFLOWS PANEL ===== -->
-            <div id="workflows-panel" class="panel active">
+            <div id="workflows-panel" class="panel">
                 <div class="panel-header">
                     <h1>Workflows</h1>
                     <p>Build and manage automation workflow ladders</p>
@@ -768,6 +904,7 @@
     <div id="live-console-backdrop" class="live-console-backdrop"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.6/ace.min.js"></script>
+    <script src="/static/dashboard.js"></script>
     <script src="/static/core.js"></script>
     <script src="/static/scripts.js"></script>
     <script src="/static/webhooks.js"></script>

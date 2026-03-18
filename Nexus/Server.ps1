@@ -68,6 +68,9 @@ Start-PodeServer -Threads 4 {
     $resultTable = [System.Collections.Concurrent.ConcurrentDictionary[string, hashtable]]::new()
     Set-PodeState -Name 'WorkflowResults' -Value $resultTable | Out-Null
 
+    # Dashboard cache — serves instant results while background timer refreshes
+    Set-PodeState -Name 'DashboardCache' -Value @{ data = $null; lastUpdated = $null } | Out-Null
+
     # ===== BLOB STORAGE HELPERS =====
     # Container layout on configured storage account:
     #   nexus-config/        - workflow definitions, schedules, webhook configs, file check configs
@@ -728,6 +731,40 @@ Start-PodeServer -Threads 4 {
         }
     }
 
+    # ===== DASHBOARD ROUTE =====
+    Add-PodeRoute -Method Get -Path '/api/dashboard' -ScriptBlock {
+        try {
+            $forceRefresh = ($WebEvent.Query['refresh'] -eq 'true')
+            $cache = Get-PodeState -Name 'DashboardCache'
+
+            if ($forceRefresh -or -not $cache.data) {
+                # Live fetch — update cache in-line
+                $result = & './Scripts/PODE/GetDashboardData.ps1'
+                $cache.data = $result
+                $cache.lastUpdated = [datetime]::UtcNow
+                Set-PodeState -Name 'DashboardCache' -Value $cache | Out-Null
+                $result['cached'] = $false
+                $result['cacheAge'] = 0
+                Write-PodeJsonResponse -Value $result
+            } else {
+                # Serve from cache
+                $result = $cache.data.Clone()
+                # Overlay live running-jobs so that's always current
+                $running = Get-PodeState -Name 'RunningWorkflows'
+                $runningList = @()
+                if ($running -and $running.Keys.Count -gt 0) {
+                    foreach ($name in $running.Keys) { $runningList += $name }
+                }
+                $result['running'] = $runningList
+                $result['cached'] = $true
+                $result['cacheAge'] = [math]::Round(([datetime]::UtcNow - $cache.lastUpdated).TotalSeconds)
+                Write-PodeJsonResponse -Value $result
+            }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
     # ===== WORKFLOW ROUTES =====
 
     # List all workflows
@@ -1318,6 +1355,22 @@ Start-PodeServer -Threads 4 {
             Write-PodeJsonResponse -Value @{ success = $false; message = "GitHub install failed: $($_.Exception.Message)" } -StatusCode 500
         } finally {
             if (Test-Path $tempDir) { Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    # ===== DASHBOARD CACHE TIMER =====
+    # Refresh dashboard data every 2 minutes in the background
+    Add-PodeTimer -Name 'DashboardRefresh' -Interval 120 -ScriptBlock {
+        try {
+            $result = & './Scripts/PODE/GetDashboardData.ps1'
+            if ($result.success) {
+                $cache = Get-PodeState -Name 'DashboardCache'
+                $cache.data = $result
+                $cache.lastUpdated = [datetime]::UtcNow
+                Set-PodeState -Name 'DashboardCache' -Value $cache | Out-Null
+            }
+        } catch {
+            # Silently fail — stale cache is better than no cache
         }
     }
 

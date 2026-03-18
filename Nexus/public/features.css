@@ -421,3 +421,287 @@
 .con-info    { color: #4ade80; }
 .con-err     { color: #f87171; }
 .con-verbose { color: #fbbf24; }
+
+/* ─── Dashboard ──────────────────────────────────────── */
+
+.dash-section { margin-bottom: 28px; }
+.dash-section > h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+    padding-left: 2px;
+}
+
+/* ── Shared card surface ── */
+.dash-surface {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+}
+.dash-surface:hover {
+    border-color: var(--border-hover);
+}
+
+/* ── Resource summary cards ── */
+.dash-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 14px;
+}
+.dash-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 14px 16px;
+    text-align: center;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, box-shadow 0.25s, transform 0.2s;
+}
+.dash-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent), transparent);
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+.dash-card:hover {
+    border-color: var(--border-accent);
+    box-shadow: 0 4px 20px rgba(249, 115, 22, 0.08), 0 0 0 1px var(--border-accent);
+    transform: translateY(-3px);
+}
+.dash-card:hover::before { opacity: 1; }
+.dash-card-value {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+.dash-card-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+
+/* ── Running jobs banner ── */
+.dash-running-banner {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    position: relative;
+    overflow: hidden;
+}
+.dash-running-banner::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    width: 3px;
+    background: var(--success);
+    border-radius: 3px 0 0 3px;
+}
+.dash-running-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.dash-running-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0;
+}
+.dash-badge {
+    background: var(--accent);
+    color: #fff;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 10px;
+    padding: 2px 9px;
+    min-width: 22px;
+    text-align: center;
+    box-shadow: 0 0 8px var(--accent-glow);
+}
+.dash-badge.pulse {
+    animation: dashPulse 2s ease-in-out infinite;
+}
+@keyframes dashPulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--accent-glow); }
+    50% { opacity: 0.7; box-shadow: 0 0 16px var(--accent-glow); }
+}
+.dash-running-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 0;
+    font-size: 13px;
+}
+.dash-running-item a {
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+.dash-running-item a:hover { color: var(--accent); }
+.dash-running-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+    animation: dashPulseDot 2s ease-in-out infinite;
+    flex-shrink: 0;
+}
+@keyframes dashPulseDot {
+    0%, 100% { box-shadow: 0 0 4px rgba(16, 185, 129, 0.4); }
+    50% { box-shadow: 0 0 10px rgba(16, 185, 129, 0.7); }
+}
+.text-muted {
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+/* ── 24h stats row ── */
+.dash-stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 14px;
+}
+.dash-stat {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 14px;
+    text-align: center;
+    position: relative;
+}
+.dash-stat-value {
+    display: block;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+.dash-stat-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-top: 6px;
+    display: block;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.dash-stat-success {
+    border-color: rgba(16, 185, 129, 0.2);
+    background: linear-gradient(135deg, var(--bg-raised), rgba(16, 185, 129, 0.04));
+}
+.dash-stat-success .dash-stat-value { color: var(--success); }
+.dash-stat-failed {
+    border-color: rgba(244, 63, 94, 0.2);
+    background: linear-gradient(135deg, var(--bg-raised), rgba(244, 63, 94, 0.04));
+}
+.dash-stat-failed .dash-stat-value { color: var(--error); }
+
+/* ── Charts ── */
+.dash-charts-row {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 16px;
+}
+.dash-chart-box {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+}
+.dash-chart-box h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.dash-chart-container {
+    position: relative;
+    height: 210px;
+}
+@media (max-width: 700px) {
+    .dash-charts-row { grid-template-columns: 1fr; }
+}
+
+/* ── Leaderboard grid ── */
+.dash-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+@media (max-width: 700px) {
+    .dash-grid-2 { grid-template-columns: 1fr; }
+}
+.dash-board {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+}
+.dash-board h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* ── Dashboard tables ── */
+.dash-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.dash-table th {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-hover);
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+.dash-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+}
+.dash-table tbody tr {
+    transition: background 0.15s;
+}
+.dash-table tbody tr:hover {
+    background: rgba(255,255,255,0.02);
+}
+.dash-table tr:last-child td { border-bottom: none; }
+.dash-table a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.15s;
+}
+.dash-table a:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+}

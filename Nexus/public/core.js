@@ -11,6 +11,7 @@ document.querySelectorAll('.nav-link').forEach(link => {
         document.getElementById(panelId + '-panel').classList.add('active');
 
         // Refresh data when switching panels
+        if (panelId === 'dashboard') { loadDashboard(); startDashboardRefresh(); } else { stopDashboardRefresh(); }
         if (panelId === 'workflows') loadWorkflowList();
         if (panelId === 'scripts') loadScripts();
         if (panelId === 'webhooks') loadWebhookList();
@@ -171,6 +172,7 @@ function tickServerTime() {
 
 document.addEventListener('DOMContentLoaded', () => {
     loadVersion();
-    loadWorkflowList();
+    loadDashboard();
+    startDashboardRefresh();
     setInterval(tickServerTime, 1000);
 });
