@@ -16,6 +16,314 @@ function Write-EngineLog {
     try { [System.IO.File]::AppendAllText($logFile, $line, [System.Text.Encoding]::UTF8) } catch { }
 }
 
+# ── Step runner functions ────────────────────────────────────────────
+# Each returns @{ stdOut; stdErr; stdInfo; stdVerbose; output; command }
+
+function Invoke-PowerShellStep {
+    param([object]$Step, [hashtable]$Params, [System.Text.StringBuilder]$AllOutput, [string]$ConsoleTempFile, [string]$Timestamp, [int]$StepIndex)
+
+    $scriptContent = Read-Blob -Container 'nexus-powershell' -BlobPath $Step.script
+    if (-not $scriptContent) { throw "Script '$($Step.script)' not found in nexus-powershell" }
+
+    $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-ps-$Timestamp-$StepIndex.ps1"
+    try {
+        [System.IO.File]::WriteAllText($tempScript, $scriptContent, [System.Text.Encoding]::UTF8)
+        $stdOutLines     = @()
+        $stdErrLines     = @()
+        $stdInfoLines    = @()
+        $stdVerboseLines = @()
+        $streamBlock = {
+            if ($null -eq $_) { return }
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                $stdErrLines += $_.ToString()
+                [void]$AllOutput.AppendLine("@@ERR@@$($_.ToString())")
+            } elseif ($_ -is [System.Management.Automation.InformationRecord]) {
+                $stdInfoLines += $_.MessageData.ToString()
+                [void]$AllOutput.AppendLine("@@INFO@@$($_.MessageData.ToString())")
+            } elseif ($_ -is [System.Management.Automation.VerboseRecord]) {
+                $stdVerboseLines += $_.Message
+                [void]$AllOutput.AppendLine("@@VERBOSE@@$($_.Message)")
+            } else {
+                $stdOutLines += $_.ToString()
+                [void]$AllOutput.AppendLine("@@OUT@@$($_.ToString())")
+            }
+            try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+        }
+        if ($Params.Count -gt 0) {
+            & $tempScript @Params 4>&1 6>&1 2>&1 | ForEach-Object $streamBlock
+        } else {
+            & $tempScript 4>&1 6>&1 2>&1 | ForEach-Object $streamBlock
+        }
+        return @{
+            stdOut     = $stdOutLines     -join "`n"
+            stdErr     = $stdErrLines     -join "`n"
+            stdInfo    = $stdInfoLines    -join "`n"
+            stdVerbose = $stdVerboseLines -join "`n"
+            output     = $stdOutLines     -join "`n"
+        }
+    } finally {
+        if (Test-Path $tempScript) { Remove-Item $tempScript -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Invoke-PythonStep {
+    param([object]$Step, [hashtable]$Params, [System.Text.StringBuilder]$AllOutput, [string]$ConsoleTempFile, [string]$Timestamp, [int]$StepIndex)
+
+    $scriptContent = Read-Blob -Container 'nexus-python' -BlobPath $Step.script
+    if (-not $scriptContent) { throw "Script '$($Step.script)' not found in nexus-python" }
+
+    $scriptContent = $scriptContent -replace '^\xEF\xBB\xBF', '' -replace "`r`n", "`n" -replace "`r", "`n"
+
+    $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-py-$Timestamp-$StepIndex.py"
+    try {
+        [System.IO.File]::WriteAllText($tempScript, $scriptContent, (New-Object System.Text.UTF8Encoding $false))
+
+        $argList = @($tempScript)
+        foreach ($key in $Params.Keys) {
+            $argList += "--$key"
+            $argList += $Params[$key]
+        }
+        $stdOutLines = @()
+        $stdErrLines = @()
+        & python3 @argList 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                $stdErrLines += $_.ToString()
+                [void]$AllOutput.AppendLine("@@ERR@@$($_.ToString())")
+            } else {
+                $stdOutLines += $_.ToString()
+                [void]$AllOutput.AppendLine("@@OUT@@$($_.ToString())")
+            }
+            try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+        }
+        return @{
+            stdOut  = $stdOutLines -join "`n"
+            stdErr  = $stdErrLines -join "`n"
+            output  = $stdOutLines -join "`n"
+        }
+    } finally {
+        if (Test-Path $tempScript) { Remove-Item $tempScript -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Invoke-ShellStep {
+    param([object]$Step, [hashtable]$Params, [System.Text.StringBuilder]$AllOutput, [string]$ConsoleTempFile, [string]$Timestamp, [int]$StepIndex)
+
+    $scriptContent = Read-Blob -Container 'nexus-shell' -BlobPath $Step.script
+    if (-not $scriptContent) { throw "Script '$($Step.script)' not found in nexus-shell" }
+
+    $scriptContent = $scriptContent -replace '^\xEF\xBB\xBF', '' -replace "`r`n", "`n" -replace "`r", "`n"
+
+    $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-sh-$Timestamp-$StepIndex.sh"
+    try {
+        [System.IO.File]::WriteAllText($tempScript, $scriptContent, (New-Object System.Text.UTF8Encoding $false))
+        & chmod +x $tempScript 2>$null
+
+        $argList = @()
+        if ($Params.Count -gt 0) {
+            $argList = @($Params.GetEnumerator() | Sort-Object { [int]$_.Key } | ForEach-Object { $_.Value })
+        }
+
+        $stdOutLines = @()
+        $stdErrLines = @()
+        & bash $tempScript @argList 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                $stdErrLines += $_.ToString()
+                [void]$AllOutput.AppendLine("@@ERR@@$($_.ToString())")
+            } else {
+                $stdOutLines += $_.ToString()
+                [void]$AllOutput.AppendLine("@@OUT@@$($_.ToString())")
+            }
+            try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+        }
+        return @{
+            stdOut  = $stdOutLines -join "`n"
+            stdErr  = $stdErrLines -join "`n"
+            output  = $stdOutLines -join "`n"
+        }
+    } finally {
+        if (Test-Path $tempScript) { Remove-Item $tempScript -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Invoke-TerraformStep {
+    param([object]$Step, [hashtable]$Params, [System.Text.StringBuilder]$AllOutput, [string]$ConsoleTempFile, [string]$Timestamp, [int]$StepIndex)
+
+    $tfDir = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-tf-$Timestamp-$StepIndex"
+    New-Item -Path $tfDir -ItemType Directory -Force | Out-Null
+
+    try {
+        $tfContent = Read-Blob -Container 'nexus-terraform' -BlobPath $Step.script
+        if (-not $tfContent) { throw "Terraform file '$($Step.script)' not found in nexus-terraform" }
+
+        $tfFile = Join-Path $tfDir $Step.script
+        [System.IO.File]::WriteAllText($tfFile, $tfContent, [System.Text.Encoding]::UTF8)
+
+        if ($Params.Count -gt 0) {
+            $tfvarsLines = @()
+            foreach ($key in $Params.Keys) {
+                $tfvarsLines += "$key = `"$($Params[$key])`""
+            }
+            $tfvarsPath = Join-Path $tfDir "nexus.auto.tfvars"
+            $tfvarsLines | Set-Content -Path $tfvarsPath
+        }
+
+        Push-Location $tfDir
+        try {
+            $stdOutLines = @()
+            $tfStreamBlock = {
+                $ln = $_.ToString()
+                $stdOutLines += $ln
+                [void]$AllOutput.AppendLine("@@OUT@@$ln")
+                try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+            }
+            terraform init -no-color 2>&1 | ForEach-Object $tfStreamBlock
+            terraform apply -auto-approve -no-color 2>&1 | ForEach-Object $tfStreamBlock
+            $stdOut = $stdOutLines -join "`n"
+            $output = $stdOut
+
+            try {
+                $tfOutputJson = terraform output -json 2>&1 | Out-String
+                $output += "`n--- Terraform Outputs ---`n$tfOutputJson"
+                $stdOut += "`n--- Terraform Outputs ---`n$tfOutputJson"
+                [void]$AllOutput.AppendLine("@@OUT@@--- Terraform Outputs ---")
+                foreach ($ln in $tfOutputJson -split "`n") { [void]$AllOutput.AppendLine("@@OUT@@$ln") }
+                try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+            } catch { }
+
+            return @{ stdOut = $stdOut; output = $output }
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        if (Test-Path $tfDir) { Remove-Item $tfDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Invoke-WebhookStep {
+    param([object]$Step, [hashtable]$Params, [System.Text.StringBuilder]$AllOutput, [string]$ConsoleTempFile)
+
+    $whContent = Read-Blob -Container 'nexus-webhooks' -BlobPath "$($Step.webhook).json"
+    if (-not $whContent) { throw "Webhook '$($Step.webhook)' not found" }
+    $wh = $whContent | ConvertFrom-Json
+
+    $bodyPreview = if ($Params.Count -gt 0) { ($Params | ConvertTo-Json -Depth 5 -Compress) } else { '{}' }
+    $updatedCommand = "POST $($wh.uri) | Body: $bodyPreview"
+
+    $headers = @{ 'Content-Type' = 'application/json' }
+
+    if ($wh.authType -eq 'oauth') {
+        $tokenBody = @{
+            grant_type    = 'client_credentials'
+            client_id     = $wh.clientId
+            client_secret = $wh.clientSecret
+            scope         = 'https://management.azure.com/.default'
+        }
+        $tokenUrl = "https://login.microsoftonline.com/$($wh.tenantId)/oauth2/v2.0/token"
+        $tokenResp = Invoke-RestMethod -Method Post -Uri $tokenUrl -Body $tokenBody -ContentType 'application/x-www-form-urlencoded'
+        $headers['Authorization'] = "Bearer $($tokenResp.access_token)"
+    }
+
+    $bodyJson = $Params | ConvertTo-Json -Depth 10
+    $response = Invoke-RestMethod -Method Post -Uri $wh.uri -Headers $headers -Body $bodyJson -ContentType 'application/json'
+    $stdOut = $response | ConvertTo-Json -Depth 10
+    foreach ($ln in $stdOut -split "`n") { [void]$AllOutput.AppendLine("@@OUT@@$ln") }
+    try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+    return @{ stdOut = $stdOut; output = $stdOut; command = $updatedCommand }
+}
+
+function Invoke-FileCheckStep {
+    param([object]$Step, [hashtable]$Params, [System.Text.StringBuilder]$AllOutput, [string]$ConsoleTempFile)
+
+    $fcContent = Read-Blob -Container 'nexus-config' -BlobPath "filechecks/$($Step.filecheck).json"
+    if (-not $fcContent) { throw "File Check '$($Step.filecheck)' not found" }
+    $fc = $fcContent | ConvertFrom-Json
+
+    $updatedCommand = "FileCheck $($Step.filecheck) | Account: $($fc.storageAccount) Container: $($Params['container']) Path: $($Params['folderPath']) Timeout: $($Params['timeout'])m"
+
+    $containerName = $Params['container']
+    $folderPath = $Params['folderPath']
+    $timeoutMinutes = [int]($Params['timeout'])
+    if ([string]::IsNullOrWhiteSpace($containerName)) { throw "File Check requires 'container' parameter" }
+    if ($timeoutMinutes -le 0) { $timeoutMinutes = 5 }
+
+    $fcCtx = $null
+    if ($fc.authType -eq 'sas') {
+        $fcCtx = New-AzStorageContext -StorageAccountName $fc.storageAccount -SasToken $fc.sasToken
+    } else {
+        $fcCtx = New-AzStorageContext -StorageAccountName $fc.storageAccount -UseConnectedAccount
+    }
+
+    $prefix = if (![string]::IsNullOrWhiteSpace($folderPath)) {
+        $folderPath.TrimStart('/').TrimEnd('/') + '/'
+    } else { $null }
+
+    $baselineBlobs = @{}
+    try {
+        $existingBlobs = if ($prefix) {
+            Get-AzStorageBlob -Container $containerName -Prefix $prefix -Context $fcCtx -ErrorAction Stop
+        } else {
+            Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
+        }
+        foreach ($b in $existingBlobs) {
+            $baselineBlobs[$b.Name] = $b.LastModified
+        }
+    } catch { }
+
+    $deadline = (Get-Date).AddMinutes($timeoutMinutes)
+    $newFiles = @()
+
+    [void]$AllOutput.AppendLine("@@INFO@@  Polling $($fc.storageAccount)/$containerName/$prefix every 30s (timeout: ${timeoutMinutes}m)...")
+    try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 30
+
+        try {
+            $currentBlobs = if ($prefix) {
+                Get-AzStorageBlob -Container $containerName -Prefix $prefix -Context $fcCtx -ErrorAction Stop
+            } else {
+                Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
+            }
+        } catch {
+            [void]$AllOutput.AppendLine("@@ERR@@  Poll error: $($_.Exception.Message)")
+            try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+            continue
+        }
+
+        $newFiles = @()
+        foreach ($b in $currentBlobs) {
+            if (-not $baselineBlobs.ContainsKey($b.Name)) {
+                $newFiles += "$containerName/$($b.Name)"
+            } elseif ($b.LastModified -gt $baselineBlobs[$b.Name]) {
+                $newFiles += "$containerName/$($b.Name)"
+            }
+        }
+
+        if ($newFiles.Count -gt 0) {
+            [void]$AllOutput.AppendLine("@@INFO@@  Detected $($newFiles.Count) new/updated file(s)")
+            break
+        }
+
+        $remaining = [math]::Round(($deadline - (Get-Date)).TotalSeconds)
+        [void]$AllOutput.AppendLine("@@INFO@@  No changes yet... ${remaining}s remaining")
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+    }
+
+    if ($newFiles.Count -eq 0) {
+        throw "File Check timed out after ${timeoutMinutes} minute(s) — no new files detected in $($fc.storageAccount)/$containerName/$prefix"
+    }
+
+    $resultObj = @{ files = $newFiles }
+    $stdOut = $resultObj | ConvertTo-Json -Depth 10
+    foreach ($ln in $stdOut -split "`n") { [void]$AllOutput.AppendLine("@@OUT@@$ln") }
+    try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+    return @{ stdOut = $stdOut; output = $stdOut; command = $updatedCommand }
+}
+
+# ── End step runner functions ────────────────────────────────────────
+
 $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
 $isSingleStep = $StepIndex -ge 0
 $logBaseName = if ($isSingleStep) { "$Name-step$($StepIndex + 1)-$timestamp" } else { "$Name-$timestamp" }
@@ -163,8 +471,10 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
                 "python3 $($step.script)$(if ($argStr) { " $argStr" })"
             }
             'shell' {
-                $envStr = ($params.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' '
-                "$(if ($envStr) { "$envStr " })bash ./$($step.script)"
+                $argStr = if ($params.Count -gt 0) {
+                    ($params.GetEnumerator() | Sort-Object { [int]$_.Key } | ForEach-Object { $_.Value }) -join ' '
+                } else { '' }
+                "bash ./$($step.script)$(if ($argStr) { " $argStr" })"
             }
             'terraform' {
                 $varStr = ($params.GetEnumerator() | ForEach-Object { "-var `"$($_.Key)=$($_.Value)`"" }) -join ' '
@@ -188,301 +498,26 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
             Write-EngineLog "STEP EXEC: '$Name' $stepLabel — $commandStr"
         }
 
-        switch ($step.type) {
-            'powershell' {
-                $scriptContent = Read-Blob -Container 'nexus-powershell' -BlobPath $step.script
-                if (-not $scriptContent) { throw "Script '$($step.script)' not found in nexus-powershell" }
-
-                $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-ps-$timestamp-$i.ps1"
-                try {
-                    [System.IO.File]::WriteAllText($tempScript, $scriptContent, [System.Text.Encoding]::UTF8)
-                    # Stream stdout, stderr, information, and verbose line-by-line to the live console
-                    $stdOutLines     = @()
-                    $stdErrLines     = @()
-                    $stdInfoLines    = @()
-                    $stdVerboseLines = @()
-                    $streamBlock = {
-                        if ($_ -is [System.Management.Automation.ErrorRecord]) {
-                            $stdErrLines += $_.ToString()
-                            [void]$allOutput.AppendLine("@@ERR@@$($_.ToString())")
-                        } elseif ($_ -is [System.Management.Automation.InformationRecord]) {
-                            $stdInfoLines += $_.MessageData.ToString()
-                            [void]$allOutput.AppendLine("@@INFO@@$($_.MessageData.ToString())")
-                        } elseif ($_ -is [System.Management.Automation.VerboseRecord]) {
-                            $stdVerboseLines += $_.Message
-                            [void]$allOutput.AppendLine("@@VERBOSE@@$($_.Message)")
-                        } else {
-                            $stdOutLines += $_.ToString()
-                            [void]$allOutput.AppendLine("@@OUT@@$($_.ToString())")
-                        }
-                        try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-                    }
-                    if ($params.Count -gt 0) {
-                        & $tempScript @params 4>&1 6>&1 2>&1 | ForEach-Object $streamBlock
-                    } else {
-                        & $tempScript 4>&1 6>&1 2>&1 | ForEach-Object $streamBlock
-                    }
-                    $stdOut     = $stdOutLines     -join "`n"
-                    $stdErr     = $stdErrLines     -join "`n"
-                    $stdInfo    = $stdInfoLines    -join "`n"
-                    $stdVerbose = $stdVerboseLines -join "`n"
-                    $output     = $stdOut
-                } finally {
-                    if (Test-Path $tempScript) { Remove-Item $tempScript -Force -ErrorAction SilentlyContinue }
-                }
-            }
-
-            'terraform' {
-                $tfDir = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-tf-$timestamp-$i"
-                New-Item -Path $tfDir -ItemType Directory -Force | Out-Null
-
-                try {
-                    $tfContent = Read-Blob -Container 'nexus-terraform' -BlobPath $step.script
-                    if (-not $tfContent) { throw "Terraform file '$($step.script)' not found in nexus-terraform" }
-
-                    $tfFile = Join-Path $tfDir $step.script
-                    [System.IO.File]::WriteAllText($tfFile, $tfContent, [System.Text.Encoding]::UTF8)
-
-                    if ($params.Count -gt 0) {
-                        $tfvarsLines = @()
-                        foreach ($key in $params.Keys) {
-                            $tfvarsLines += "$key = `"$($params[$key])`""
-                        }
-                        $tfvarsPath = Join-Path $tfDir "nexus.auto.tfvars"
-                        $tfvarsLines | Set-Content -Path $tfvarsPath
-                    }
-
-                    Push-Location $tfDir
-                    try {
-                        $stdOutLines = @()
-                        $tfStreamBlock = {
-                            $ln = $_.ToString()
-                            $stdOutLines += $ln
-                            [void]$allOutput.AppendLine("@@OUT@@$ln")
-                            try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-                        }
-                        terraform init -no-color 2>&1 | ForEach-Object $tfStreamBlock
-                        terraform apply -auto-approve -no-color 2>&1 | ForEach-Object $tfStreamBlock
-                        $stdOut = $stdOutLines -join "`n"
-                        $output = $stdOut
-
-                        try {
-                            $tfOutputJson = terraform output -json 2>&1 | Out-String
-                            $output += "`n--- Terraform Outputs ---`n$tfOutputJson"
-                            $stdOut += "`n--- Terraform Outputs ---`n$tfOutputJson"
-                            [void]$allOutput.AppendLine("@@OUT@@--- Terraform Outputs ---")
-                            foreach ($ln in $tfOutputJson -split "`n") { [void]$allOutput.AppendLine("@@OUT@@$ln") }
-                            try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-                        } catch { }
-                    } finally {
-                        Pop-Location
-                    }
-                } finally {
-                    if (Test-Path $tfDir) { Remove-Item $tfDir -Recurse -Force -ErrorAction SilentlyContinue }
-                }
-            }
-
-            'python' {
-                $scriptContent = Read-Blob -Container 'nexus-python' -BlobPath $step.script
-                if (-not $scriptContent) { throw "Script '$($step.script)' not found in nexus-python" }
-
-                $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-py-$timestamp-$i.py"
-                try {
-                    [System.IO.File]::WriteAllText($tempScript, $scriptContent, [System.Text.Encoding]::UTF8)
-
-                    $argList = @($tempScript)
-                    foreach ($key in $params.Keys) {
-                        $argList += "--$key"
-                        $argList += $params[$key]
-                    }
-                    $stdOutLines = @()
-                    $stdErrLines = @()
-                    & python3 @argList 2>&1 | ForEach-Object {
-                        if ($_ -is [System.Management.Automation.ErrorRecord]) {
-                            $stdErrLines += $_.ToString()
-                            [void]$allOutput.AppendLine("@@ERR@@$($_.ToString())")
-                        } else {
-                            $stdOutLines += $_.ToString()
-                            [void]$allOutput.AppendLine("@@OUT@@$($_.ToString())")
-                        }
-                        try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-                    }
-                    $stdOut = $stdOutLines -join "`n"
-                    $stdErr = $stdErrLines -join "`n"
-                    $output = $stdOut
-                } finally {
-                    if (Test-Path $tempScript) { Remove-Item $tempScript -Force -ErrorAction SilentlyContinue }
-                }
-            }
-
-            'shell' {
-                $scriptContent = Read-Blob -Container 'nexus-shell' -BlobPath $step.script
-                if (-not $scriptContent) { throw "Script '$($step.script)' not found in nexus-shell" }
-
-                $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-sh-$timestamp-$i.sh"
-                try {
-                    [System.IO.File]::WriteAllText($tempScript, $scriptContent, [System.Text.Encoding]::UTF8)
-                    & chmod +x $tempScript 2>$null
-
-                    foreach ($key in $params.Keys) {
-                        [System.Environment]::SetEnvironmentVariable($key, $params[$key])
-                    }
-                    $stdOutLines = @()
-                    $stdErrLines = @()
-                    & bash $tempScript 2>&1 | ForEach-Object {
-                        if ($_ -is [System.Management.Automation.ErrorRecord]) {
-                            $stdErrLines += $_.ToString()
-                            [void]$allOutput.AppendLine("@@ERR@@$($_.ToString())")
-                        } else {
-                            $stdOutLines += $_.ToString()
-                            [void]$allOutput.AppendLine("@@OUT@@$($_.ToString())")
-                        }
-                        try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-                    }
-                    $stdOut = $stdOutLines -join "`n"
-                    $stdErr = $stdErrLines -join "`n"
-                    $output = $stdOut
-                } finally {
-                    foreach ($key in $params.Keys) {
-                        [System.Environment]::SetEnvironmentVariable($key, $null)
-                    }
-                    if (Test-Path $tempScript) { Remove-Item $tempScript -Force -ErrorAction SilentlyContinue }
-                }
-            }
-
-            'webhook' {
-                $whContent = Read-Blob -Container 'nexus-webhooks' -BlobPath "$($step.webhook).json"
-                if (-not $whContent) { throw "Webhook '$($step.webhook)' not found" }
-                $wh = $whContent | ConvertFrom-Json
-
-                # Update command string with actual URI now that webhook config is loaded
-                $bodyPreview = if ($params.Count -gt 0) { ($params | ConvertTo-Json -Depth 5 -Compress) } else { '{}' }
-                $stepLog.command = "POST $($wh.uri) | Body: $bodyPreview"
-
-                $headers = @{ 'Content-Type' = 'application/json' }
-
-                if ($wh.authType -eq 'oauth') {
-                    $tokenBody = @{
-                        grant_type    = 'client_credentials'
-                        client_id     = $wh.clientId
-                        client_secret = $wh.clientSecret
-                        scope         = 'https://management.azure.com/.default'
-                    }
-                    $tokenUrl = "https://login.microsoftonline.com/$($wh.tenantId)/oauth2/v2.0/token"
-                    $tokenResp = Invoke-RestMethod -Method Post -Uri $tokenUrl -Body $tokenBody -ContentType 'application/x-www-form-urlencoded'
-                    $headers['Authorization'] = "Bearer $($tokenResp.access_token)"
-                }
-
-                $body = $params
-                $bodyJson = $body | ConvertTo-Json -Depth 10
-
-                $response = Invoke-RestMethod -Method Post -Uri $wh.uri -Headers $headers -Body $bodyJson -ContentType 'application/json'
-                $stdOut = $response | ConvertTo-Json -Depth 10
-                $output = $stdOut
-                foreach ($ln in $stdOut -split "`n") { [void]$allOutput.AppendLine("@@OUT@@$ln") }
-                try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-            }
-
-            'filecheck' {
-                # Load file check configuration
-                $fcContent = Read-Blob -Container 'nexus-config' -BlobPath "filechecks/$($step.filecheck).json"
-                if (-not $fcContent) { throw "File Check '$($step.filecheck)' not found" }
-                $fc = $fcContent | ConvertFrom-Json
-
-                # Update command string with storage account from config
-                $stepLog.command = "FileCheck $($step.filecheck) | Account: $($fc.storageAccount) Container: $($params['container']) Path: $($params['folderPath']) Timeout: $($params['timeout'])m"
-
-                # Get params: container, folderPath, timeout
-                $containerName = $params['container']
-                $folderPath = $params['folderPath']
-                $timeoutMinutes = [int]($params['timeout'])
-                if ([string]::IsNullOrWhiteSpace($containerName)) { throw "File Check requires 'container' parameter" }
-                if ($timeoutMinutes -le 0) { $timeoutMinutes = 5 }
-
-                # Build storage context based on auth type
-                $fcCtx = $null
-                if ($fc.authType -eq 'sas') {
-                    $fcCtx = New-AzStorageContext -StorageAccountName $fc.storageAccount -SasToken $fc.sasToken
-                } else {
-                    # RBAC — use the already-connected service principal
-                    $fcCtx = New-AzStorageContext -StorageAccountName $fc.storageAccount -UseConnectedAccount
-                }
-
-                # Normalize folder path prefix
-                $prefix = if (![string]::IsNullOrWhiteSpace($folderPath)) {
-                    $folderPath.TrimStart('/').TrimEnd('/') + '/'
-                } else { $null }
-
-                # Snapshot the current file state (last-modified times)
-                $baselineBlobs = @{}
-                try {
-                    $existingBlobs = if ($prefix) {
-                        Get-AzStorageBlob -Container $containerName -Prefix $prefix -Context $fcCtx -ErrorAction Stop
-                    } else {
-                        Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
-                    }
-                    foreach ($b in $existingBlobs) {
-                        $baselineBlobs[$b.Name] = $b.LastModified
-                    }
-                } catch {
-                    # Empty container or path — baseline is empty
-                }
-
-                $stepStartCheck = Get-Date
-                $deadline = $stepStartCheck.AddMinutes($timeoutMinutes)
-                $newFiles = @()
-
-                [void]$allOutput.AppendLine("@@INFO@@  Polling $($fc.storageAccount)/$containerName/$prefix every 30s (timeout: ${timeoutMinutes}m)...")
-                try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-
-                while ((Get-Date) -lt $deadline) {
-                    Start-Sleep -Seconds 30
-
-                    try {
-                        $currentBlobs = if ($prefix) {
-                            Get-AzStorageBlob -Container $containerName -Prefix $prefix -Context $fcCtx -ErrorAction Stop
-                        } else {
-                            Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
-                        }
-                    } catch {
-                        [void]$allOutput.AppendLine("@@ERR@@  Poll error: $($_.Exception.Message)")
-                        try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-                        continue
-                    }
-
-                    $newFiles = @()
-                    foreach ($b in $currentBlobs) {
-                        if (-not $baselineBlobs.ContainsKey($b.Name)) {
-                            # Brand new file
-                            $newFiles += "$containerName/$($b.Name)"
-                        } elseif ($b.LastModified -gt $baselineBlobs[$b.Name]) {
-                            # Updated file
-                            $newFiles += "$containerName/$($b.Name)"
-                        }
-                    }
-
-                    if ($newFiles.Count -gt 0) {
-                        [void]$allOutput.AppendLine("@@INFO@@  Detected $($newFiles.Count) new/updated file(s)")
-                        break
-                    }
-
-                    $remaining = [math]::Round(($deadline - (Get-Date)).TotalSeconds)
-                    [void]$allOutput.AppendLine("@@INFO@@  No changes yet... ${remaining}s remaining")
-                    try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-                }
-
-                if ($newFiles.Count -eq 0) {
-                    throw "File Check timed out after ${timeoutMinutes} minute(s) — no new files detected in $($fc.storageAccount)/$containerName/$prefix"
-                }
-
-                # Build output JSON
-                $resultObj = @{ files = $newFiles }
-                $stdOut = $resultObj | ConvertTo-Json -Depth 10
-                $output = $stdOut
-                foreach ($ln in $stdOut -split "`n") { [void]$allOutput.AppendLine("@@OUT@@$ln") }
-                try { [System.IO.File]::WriteAllText($consoleTempFile, $allOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-            }
+        # ── Dispatch to runner function ──────────────────────────────
+        $runnerArgs = @{
+            Step = $step; Params = $params
+            AllOutput = $allOutput; ConsoleTempFile = $consoleTempFile
+            Timestamp = $timestamp; StepIndex = $i
         }
+        $result = switch ($step.type) {
+            'powershell' { Invoke-PowerShellStep @runnerArgs }
+            'python'     { Invoke-PythonStep @runnerArgs }
+            'shell'      { Invoke-ShellStep @runnerArgs }
+            'terraform'  { Invoke-TerraformStep @runnerArgs }
+            'webhook'    { Invoke-WebhookStep @runnerArgs }
+            'filecheck'  { Invoke-FileCheckStep @runnerArgs }
+        }
+        $stdOut     = $result.stdOut
+        $stdErr     = $result.stdErr
+        $stdInfo    = $result.stdInfo
+        $stdVerbose = $result.stdVerbose
+        $output     = $result.output
+        if ($result.command) { $stepLog.command = $result.command }
 
         # Write remaining streams to blob logs (console was already updated live)
         if ($stdInfo) {
