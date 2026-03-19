@@ -253,6 +253,10 @@ function renderLadder() {
                 <div class="kv-list">${kvHtml}</div>
                 <button class="add-kv-btn" onclick="addKV(${idx})">+ Add Key/Value</button>
 
+                <div class="step-options" style="margin-top: 12px; display: flex; gap: 16px; align-items: center;">
+                    <label class="step-checkbox"><input type="checkbox" class="halt-on-error" ${step.haltOnError ? 'checked' : ''} /> Halt on any error</label>
+                </div>
+
                 <div class="output-capture" style="margin-top: 12px;">
                     <label>Breakpoint Checks (halt if value doesn't match)</label>
                     <div class="breakpoint-list">${breakpointHtml}</div>
@@ -292,6 +296,10 @@ function readLadderState() {
                 validateSet: old.validateSet || null
             });
         });
+
+        // Read halt-on-error checkbox
+        const haltCb = stepEl.querySelector('.halt-on-error');
+        currentWorkflow.steps[idx].haltOnError = haltCb ? haltCb.checked : false;
 
         // Read breakpoint checks
         const bpPairs = stepEl.querySelectorAll('.breakpoint-list .kv-pair');
@@ -626,7 +634,8 @@ document.getElementById('confirm-add-step-btn').addEventListener('click', () => 
         type: type,
         params: [],
         breakpointChecks: [],
-        inputMapping: []
+        inputMapping: [],
+        haltOnError: false
     };
     if (type === 'webhook') {
         newStep.webhook = resource;

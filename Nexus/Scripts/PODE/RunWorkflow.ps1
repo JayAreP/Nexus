@@ -532,6 +532,11 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
             [void]$allErrors.AppendLine("  $stepLabel")
             [void]$allErrors.AppendLine("=========================================")
             [void]$allErrors.AppendLine($stdErr)
+
+            # Halt-on-error: treat any stderr output as a step failure
+            if ($step.haltOnError -eq $true) {
+                throw "Step $($i + 1) halted — errors detected in error stream:`n$stdErr"
+            }
         }
         [void]$allOutput.AppendLine("")
 

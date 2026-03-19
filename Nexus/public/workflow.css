@@ -273,6 +273,23 @@
     background: var(--accent-subtle);
 }
 
+/* ─── Step Checkbox Options ───────────────────────────── */
+.step-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+}
+.step-checkbox input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+}
+
 /* ─── Output Capture ──────────────────────────────────── */
 .output-capture {
     margin-top: 12px;
