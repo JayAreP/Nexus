@@ -430,6 +430,10 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
                         } else {
                             $params[$kv.key] = @($kv.value)
                         }
+                    } elseif ($kv.type -eq 'switch') {
+                        if ($kv.value -eq $true -or $kv.value -eq 'true' -or $kv.value -eq 'True') {
+                            $params[$kv.key] = [switch]$true
+                        }
                     } else {
                         $params[$kv.key] = $kv.value
                     }
@@ -458,7 +462,9 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
         $commandStr = switch ($step.type) {
             'powershell' {
                 $paramStr = ($params.GetEnumerator() | ForEach-Object {
-                    if ($_.Value -is [array]) {
+                    if ($_.Value -is [switch] -or $_.Value -is [bool]) {
+                        "-$($_.Key)"
+                    } elseif ($_.Value -is [array]) {
                         "-$($_.Key) $($_.Value -join ',')"
                     } else {
                         "-$($_.Key) $($_.Value)"

@@ -71,6 +71,7 @@
                 </a></li>
             </ul>
             <div class="sidebar-footer">
+                <div id="sidebar-notifications"></div>
                 <button type="button" id="engine-log-btn">Engine Log</button>
                 <p id="server-time" style="margin-bottom: 4px;"></p>
                 <p id="app-version">Version <span id="version-number">loading...</span></p>
@@ -218,8 +219,6 @@
                     <p>Build and manage automation workflow ladders</p>
                 </div>
                 <div class="panel-body">
-                    <div id="workflow-message" class="message"></div>
-
                     <div class="section-header">
                         <h3>Saved Workflows</h3>
                         <div style="display: flex; gap: 8px;">
@@ -244,8 +243,6 @@
                     <p>Upload and manage scripts stored in your configured storage account</p>
                 </div>
                 <div class="panel-body">
-                    <div id="scripts-message" class="message"></div>
-
                     <!-- Script type tabs -->
                     <div style="display: flex; gap: 8px; margin-bottom: 20px; align-items: center;">
                         <button type="button" class="btn btn-primary btn-sm script-tab active" data-type="powershell">PowerShell</button>
@@ -276,8 +273,6 @@
                     <p>Manage webhook configurations for use in workflow steps</p>
                 </div>
                 <div class="panel-body">
-                    <div id="webhooks-message" class="message"></div>
-
                     <div class="section-header">
                         <h3>Saved Webhooks</h3>
                         <button type="button" id="add-webhook-btn" class="btn btn-primary btn-sm">+ Add Webhook</button>
@@ -299,8 +294,6 @@
                     <p>Monitor storage account containers for file updates</p>
                 </div>
                 <div class="panel-body">
-                    <div id="filechecks-message" class="message"></div>
-
                     <div class="section-header">
                         <h3>Saved File Checks</h3>
                         <button type="button" id="add-filecheck-btn" class="btn btn-primary btn-sm">+ Add File Check</button>
@@ -322,8 +315,6 @@
                     <p>Manage credentials for use in workflow scripts via the NLS module</p>
                 </div>
                 <div class="panel-body">
-                    <div id="credentials-message" class="message"></div>
-
                     <div class="section-header">
                         <h3>Saved Credentials</h3>
                         <div style="display: flex; gap: 8px;">
@@ -348,8 +339,6 @@
                     <p>Execute workflows manually or set up schedules</p>
                 </div>
                 <div class="panel-body">
-                    <div id="runner-message" class="message"></div>
-
                     <!-- Manual Run -->
                     <h3 style="margin-bottom: 16px; font-size: 15px; color: var(--text-primary);">Manual Run</h3>
                     <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 32px;">
@@ -424,8 +413,6 @@
                     <p>Review execution logs for workflow runs</p>
                 </div>
                 <div class="panel-body">
-                    <div id="logs-message" class="message"></div>
-
                     <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 20px;">
                         <select id="logs-workflow-select" style="flex: 1;">
                             <option value="">-- Select a workflow --</option>
@@ -468,8 +455,6 @@
                     <p>View and install PowerShell modules, Python packages, and system packages</p>
                 </div>
                 <div class="panel-body">
-                    <div id="modules-message" class="message"></div>
-
                     <!-- Module type tabs -->
                     <div style="display: flex; gap: 8px; margin-bottom: 20px;">
                         <button type="button" class="btn btn-primary btn-sm module-tab active" data-type="powershell">PowerShell</button>
@@ -530,7 +515,6 @@
                     <p>Restricted test environment &mdash; pwsh, python3, terraform, az, aws, gcloud, bash</p>
                 </div>
                 <div class="panel-body">
-                    <div id="sandbox-message" class="message"></div>
                     <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
                         <button class="btn btn-secondary btn-sm" id="sandbox-reset-btn">Reset Workspace</button>
                         <button class="btn btn-secondary btn-sm" id="sandbox-popout-btn">Pop Out</button>
@@ -548,7 +532,6 @@
                     <p>Configure the storage account used for scripts, workflows, and logs</p>
                 </div>
                 <div class="panel-body">
-                    <div id="config-message" class="message"></div>
                     <form id="config-form">
                         <div class="form-group">
                             <label>Storage Account Name</label>

@@ -81,18 +81,35 @@ Start-PodeServer -Threads 4 {
     #   nexus-webhooks/      - webhook JSON configs
     #   {workflow-name}/     - per-workflow container for logs and run data
 
+    # ── In-memory blob cache (Pode State for cross-runspace sharing) ────
+    $blobCache = [System.Collections.Concurrent.ConcurrentDictionary[string, string]]::new()
+    $listCache = [System.Collections.Concurrent.ConcurrentDictionary[string, hashtable]]::new()
+    Set-PodeState -Name 'StorageCtx'   -Value @{ ctx = $null }      | Out-Null
+    Set-PodeState -Name 'BlobCache'    -Value $blobCache             | Out-Null
+    Set-PodeState -Name 'ListCache'    -Value $listCache             | Out-Null
+    Set-PodeState -Name 'ListCacheTTL' -Value 120                   | Out-Null
+
     function Get-AppStorageContext {
+        $store = Get-PodeState -Name 'StorageCtx'
+        if ($store.ctx) { return $store.ctx }
         $cfg = Get-Content -Path './conf/config.json' -Raw | ConvertFrom-Json
-        return New-AzStorageContext -StorageAccountName $cfg.storageAccount -StorageAccountKey $cfg.key
+        $store.ctx = New-AzStorageContext -StorageAccountName $cfg.storageAccount -StorageAccountKey $cfg.key
+        return $store.ctx
     }
 
     function Read-Blob {
         param([string]$Container, [string]$BlobPath)
+        $cacheKey = "$Container|$BlobPath"
+        $cache = Get-PodeState -Name 'BlobCache'
+        $cached = $null
+        if ($cache.TryGetValue($cacheKey, [ref]$cached)) { return $cached }
         $ctx = Get-AppStorageContext
         $tempFile = [System.IO.Path]::GetTempFileName()
         try {
             Get-AzStorageBlobContent -Container $Container -Blob $BlobPath -Destination $tempFile -Context $ctx -Force -ErrorAction Stop | Out-Null
-            return Get-Content -Path $tempFile -Raw
+            $content = Get-Content -Path $tempFile -Raw
+            $cache[$cacheKey] = $content
+            return $content
         } catch {
             return $null
         } finally {
@@ -107,6 +124,13 @@ Start-PodeServer -Threads 4 {
         try {
             [System.IO.File]::WriteAllText($tempFile, $Content, [System.Text.Encoding]::UTF8)
             Set-AzStorageBlobContent -Container $Container -Blob $BlobPath -File $tempFile -Context $ctx -Force | Out-Null
+            # Update blob cache, invalidate list cache for this container
+            $bCache = Get-PodeState -Name 'BlobCache'
+            $bCache["$Container|$BlobPath"] = $Content
+            $lCache = Get-PodeState -Name 'ListCache'
+            foreach ($k in @($lCache.Keys | Where-Object { $_ -like "$Container|*" })) {
+                $lCache.TryRemove($k, [ref]$null) | Out-Null
+            }
         } finally {
             if (Test-Path $tempFile) { Remove-Item $tempFile -Force -ErrorAction SilentlyContinue }
         }
@@ -138,17 +162,35 @@ Start-PodeServer -Threads 4 {
         try {
             Remove-AzStorageBlob -Container $Container -Blob $BlobPath -Context $ctx -Force -ErrorAction Stop
         } catch { }
+        # Invalidate caches
+        $bCache = Get-PodeState -Name 'BlobCache'
+        $bCache.TryRemove("$Container|$BlobPath", [ref]$null) | Out-Null
+        $lCache = Get-PodeState -Name 'ListCache'
+        foreach ($k in @($lCache.Keys | Where-Object { $_ -like "$Container|*" })) {
+            $lCache.TryRemove($k, [ref]$null) | Out-Null
+        }
     }
 
     function Get-BlobList {
         param([string]$Container, [string]$Prefix)
+        $cacheKey = "$Container|$Prefix"
+        $lCache = Get-PodeState -Name 'ListCache'
+        $ttl = Get-PodeState -Name 'ListCacheTTL'
+        $cached = $null
+        if ($lCache.TryGetValue($cacheKey, [ref]$cached)) {
+            if (((Get-Date) - $cached.ts).TotalSeconds -lt $ttl) {
+                return $cached.items
+            }
+        }
         $ctx = Get-AppStorageContext
         try {
-            if ($Prefix) {
-                return Get-AzStorageBlob -Container $Container -Prefix $Prefix -Context $ctx -ErrorAction Stop
+            $items = if ($Prefix) {
+                @(Get-AzStorageBlob -Container $Container -Prefix $Prefix -Context $ctx -ErrorAction Stop)
             } else {
-                return Get-AzStorageBlob -Container $Container -Context $ctx -ErrorAction Stop
+                @(Get-AzStorageBlob -Container $Container -Context $ctx -ErrorAction Stop)
             }
+            $lCache[$cacheKey] = @{ items = $items; ts = (Get-Date) }
+            return $items
         } catch {
             return @()
         }
@@ -1079,6 +1121,9 @@ Start-PodeServer -Threads 4 {
             return
         }
         Write-EngineLog "RUN REQUEST: '$name' — accepted, firing timer"
+        # Clear stale console output
+        $consolePath = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-console-$($name.ToLower()).log"
+        if (Test-Path $consolePath) { [System.IO.File]::WriteAllText($consolePath, '', [System.Text.Encoding]::UTF8) }
         $results = Get-PodeState -Name 'WorkflowResults'
         $results[$name] = @{ status = 'running'; message = '' }
         # Fire a one-shot timer — runs in Pode's timer runspace with full server function access
@@ -1115,6 +1160,9 @@ Start-PodeServer -Threads 4 {
             return
         }
         Write-EngineLog "RUN-STEP REQUEST: '$name' step $($stepIndex + 1) — accepted, firing timer"
+        # Clear stale console output
+        $consolePath = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-console-$($name.ToLower()).log"
+        if (Test-Path $consolePath) { [System.IO.File]::WriteAllText($consolePath, '', [System.Text.Encoding]::UTF8) }
         $results = Get-PodeState -Name 'WorkflowResults'
         $results[$name] = @{ status = 'running'; message = '' }
         $timerName = "wf-step-$name-$stepIndex-$((Get-Date).Ticks)"

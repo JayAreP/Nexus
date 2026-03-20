@@ -42,18 +42,36 @@ function renderHighlighted(container, code, type) {
 }
 
 function showMessage(elementId, type, text) {
-    const el = document.getElementById(elementId);
-    el.className = 'message ' + type;
-    el.textContent = text;
-    if (type === 'success' || type === 'info') {
-        setTimeout(() => { el.className = 'message'; el.textContent = ''; }, 5000);
+    // Modal messages stay in-place
+    if (elementId === 'export-message' || elementId === 'import-message') {
+        const el = document.getElementById(elementId);
+        el.className = 'message ' + type;
+        el.textContent = text;
+        if (type === 'success' || type === 'info') {
+            setTimeout(() => { el.className = 'message'; el.textContent = ''; }, 5000);
+        }
+        return;
     }
+    // Everything else goes to sidebar notification area
+    const container = document.getElementById('sidebar-notifications');
+    const note = document.createElement('div');
+    note.className = 'sidebar-note ' + type;
+    note.textContent = text;
+    container.appendChild(note);
+    // Auto-dismiss after timeout
+    const timeout = (type === 'error') ? 8000 : 5000;
+    setTimeout(() => {
+        note.classList.add('fade-out');
+        setTimeout(() => note.remove(), 300);
+    }, timeout);
 }
 
 function clearMessage(elementId) {
     const el = document.getElementById(elementId);
-    el.className = 'message';
-    el.textContent = '';
+    if (el) {
+        el.className = 'message';
+        el.textContent = '';
+    }
 }
 
 function escHtml(str) {

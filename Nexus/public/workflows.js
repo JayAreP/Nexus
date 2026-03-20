@@ -165,7 +165,11 @@ function renderLadder() {
             const mandatoryIcon = kv.mandatory ? '<span title="Mandatory" style="position: absolute; left: -20px; color: #e53e3e; font-size: 14px;">⚠</span>' : '';
             const placeholder = kv.type || 'Value';
             let valueField;
-            if (kv.type === 'array') {
+            if (kv.type === 'switch') {
+                // Switch parameter — checkbox only
+                const checked = (kv.value === true || kv.value === 'true') ? 'checked' : '';
+                valueField = `<label class="switch-param" style="display: flex; align-items: center; gap: 6px; flex: 1; font-size: 12px; cursor: pointer;"><input type="checkbox" class="kv-switch" ${checked}> Include</label>`;
+            } else if (kv.type === 'array') {
                 // Multi-value array UI
                 const values = Array.isArray(kv.value) ? kv.value : (kv.value ? [kv.value] : ['']);
                 const entriesHtml = values.map((v, vi) => `
@@ -281,10 +285,13 @@ function readLadderState() {
         kvPairs.forEach((kv, ki) => {
             const key = kv.querySelector('.kv-key').value.trim();
             const old = oldParams[ki] || {};
-            // Read value — array params have multiple inputs
+            // Read value — switch, array, or text
+            const switchCb = kv.querySelector('.kv-switch');
             const arrayContainer = kv.querySelector('.array-values');
             let value;
-            if (arrayContainer) {
+            if (switchCb) {
+                value = switchCb.checked;
+            } else if (arrayContainer) {
                 value = Array.from(arrayContainer.querySelectorAll('.array-value')).map(el => el.value.trim()).filter(v => v);
             } else {
                 value = kv.querySelector('.kv-value').value.trim();
