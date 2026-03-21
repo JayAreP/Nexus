@@ -69,10 +69,15 @@
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     <span>Configuration</span>
                 </a></li>
+                <li><a href="#" class="nav-link" data-panel="users">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>Users</span>
+                </a></li>
             </ul>
             <div class="sidebar-footer">
                 <div id="sidebar-notifications"></div>
                 <button type="button" id="engine-log-btn">Engine Log</button>
+                <button type="button" id="logout-btn" class="btn-logout">Sign Out</button>
                 <p id="server-time" style="margin-bottom: 4px;"></p>
                 <p id="app-version">Version <span id="version-number">loading...</span></p>
             </div>
@@ -563,6 +568,84 @@
                 </div>
             </div>
 
+            <!-- ===== USERS PANEL ===== -->
+            <div id="users-panel" class="panel">
+                <div class="panel-header">
+                    <h1>Users &amp; API Tokens</h1>
+                    <p>Manage user accounts and generate API tokens for external integrations</p>
+                </div>
+                <div class="panel-body">
+                    <div id="users-message" class="message"></div>
+
+                    <!-- Users Section -->
+                    <div class="section-header">
+                        <h3>Users</h3>
+                        <button type="button" id="add-user-btn" class="btn btn-primary btn-sm">+ New User</button>
+                    </div>
+
+                    <!-- Inline user form (hidden by default) -->
+                    <div id="user-form-section" class="user-form-section" style="display: none;">
+                        <h4 id="user-form-title">New User</h4>
+                        <form id="user-form" style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+                            <div class="form-group" style="flex: 1; min-width: 160px; margin-bottom: 0;">
+                                <label>Username</label>
+                                <input type="text" id="user-form-username" placeholder="Username" required>
+                            </div>
+                            <div class="form-group" style="flex: 1; min-width: 160px; margin-bottom: 0;">
+                                <label>Password</label>
+                                <input type="password" id="user-form-password" placeholder="Password">
+                            </div>
+                            <div class="form-group" style="min-width: 120px; margin-bottom: 0;">
+                                <label>Role</label>
+                                <select id="user-form-role">
+                                    <option value="user">User</option>
+                                    <option value="admin">Admin</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                            <button type="button" id="user-form-cancel" class="btn btn-secondary btn-sm">Cancel</button>
+                        </form>
+                    </div>
+
+                    <div id="users-list"></div>
+                    <div id="users-empty" class="empty-state" style="display: none;">
+                        <p>No users found.</p>
+                    </div>
+
+                    <!-- API Tokens Section -->
+                    <div class="section-header" style="margin-top: 40px;">
+                        <h3>API Tokens</h3>
+                    </div>
+                    <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                        API tokens provide permanent access to the Nexus API for external integrations. They do not expire.
+                    </p>
+
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 16px;">
+                        <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                            <input type="text" id="new-token-name" placeholder="Token name (e.g. CI Pipeline)">
+                        </div>
+                        <button type="button" id="create-token-btn" class="btn btn-primary btn-sm">Generate Token</button>
+                    </div>
+
+                    <!-- Shown once after creation -->
+                    <div id="new-token-display" class="new-token-display" style="display: none;">
+                        <p style="font-size: 13px; color: var(--warning); margin-bottom: 8px;">Copy this token now — it won't be shown again.</p>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                                <input type="text" id="new-token-value" readonly style="font-family: 'JetBrains Mono', monospace; font-size: 12px;">
+                            </div>
+                            <button type="button" id="copy-token-btn" class="btn btn-secondary btn-sm">Copy</button>
+                            <button type="button" id="dismiss-token-btn" class="btn btn-secondary btn-sm">Dismiss</button>
+                        </div>
+                    </div>
+
+                    <div id="api-tokens-list"></div>
+                    <div id="api-tokens-empty" class="empty-state" style="display: none;">
+                        <p>No API tokens yet.</p>
+                    </div>
+                </div>
+            </div>
+
             <!-- ===== ENGINE LOG PANEL ===== -->
             <div id="engine-log-panel" class="panel">
                 <div class="panel-header">
@@ -898,6 +981,7 @@
     </div>
     <div id="live-console-backdrop" class="live-console-backdrop"></div>
 
+    <script src="/static/auth.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.6/ace.min.js"></script>
     <script src="/static/dashboard.js"></script>
     <script src="/static/core.js"></script>
@@ -908,5 +992,6 @@
     <script src="/static/workflows.js"></script>
     <script src="/static/runner.js"></script>
     <script src="/static/logs-modules.js"></script>
+    <script src="/static/users.js"></script>
 </body>
 </html>

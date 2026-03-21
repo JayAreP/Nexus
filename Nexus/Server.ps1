@@ -294,9 +294,366 @@ Start-PodeServer -Threads 4 {
         return [System.Text.Encoding]::UTF8.GetString($decrypted)
     }
 
+    # ===== AUTHENTICATION SYSTEM =====
+    # Token-based auth with file-backed user store.
+    # Architecture supports future SSO providers (SAML / Azure AD) — every
+    # auth flow produces the same session-token format regardless of provider.
+
+    function New-RandomBytes {
+        param([int]$Count = 32)
+        $bytes = New-Object byte[] $Count
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $rng.GetBytes($bytes)
+        $rng.Dispose()
+        return $bytes
+    }
+
+    function New-Salt { return [Convert]::ToBase64String((New-RandomBytes -Count 32)) }
+
+    function New-AuthToken { return [Convert]::ToBase64String((New-RandomBytes -Count 48)) }
+
+    function Get-PasswordHash {
+        param([string]$Password, [string]$Salt)
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes("${Salt}:${Password}")
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $hash = $sha.ComputeHash($bytes)
+        $sha.Dispose()
+        return [Convert]::ToBase64String($hash)
+    }
+
+    function Get-AuthStore {
+        $path = './conf/auth.json'
+        if (Test-Path $path) {
+            $store = Get-Content $path -Raw | ConvertFrom-Json
+            if (-not $store.PSObject.Properties['sessions'])  { $store | Add-Member -NotePropertyName 'sessions'  -NotePropertyValue @() -Force }
+            if (-not $store.PSObject.Properties['apiTokens']) { $store | Add-Member -NotePropertyName 'apiTokens' -NotePropertyValue @() -Force }
+            return $store
+        }
+        return $null
+    }
+
+    function Save-AuthStore {
+        param($Store)
+        $Store | ConvertTo-Json -Depth 10 | Set-Content './conf/auth.json' -Encoding UTF8
+    }
+
+    function Get-AuthUser {
+        param($WebEvt)
+        $authHeader = Get-PodeHeader -Name 'Authorization'
+        if (-not $authHeader -or $authHeader -notmatch '^Bearer\s+(.+)$') { return $null }
+        $tkn = $Matches[1]
+        $store = Get-AuthStore
+        if (-not $store) { return $null }
+
+        foreach ($s in @($store.sessions)) {
+            if ($s -and $s.token -eq $tkn) {
+                try {
+                    if ([datetime]::Parse($s.expiresAt) -gt (Get-Date)) {
+                        $u = $store.users | Where-Object { $_.username -eq $s.username }
+                        return @{ username = $s.username; role = $u.role; type = 'session' }
+                    }
+                } catch {}
+            }
+        }
+        foreach ($t in @($store.apiTokens)) {
+            if ($t -and $t.token -eq $tkn) {
+                $u = $store.users | Where-Object { $_.username -eq $t.createdBy }
+                return @{ username = $t.createdBy; role = $u.role; type = 'apiToken' }
+            }
+        }
+        return $null
+    }
+
+    # Initialize auth store with default nexus/nexus user on first run
+    if (-not (Test-Path './conf/auth.json')) {
+        try {
+            $defSalt = New-Salt
+            $defHash = Get-PasswordHash -Password 'nexus' -Salt $defSalt
+            Save-AuthStore @{
+                users     = @(@{ username = 'nexus'; passwordHash = $defHash; salt = $defSalt; role = 'admin'; createdAt = (Get-Date).ToString('o') })
+                sessions  = @()
+                apiTokens = @()
+            }
+            Write-Host "Auth store initialized with default user (nexus / nexus)" -ForegroundColor Green
+        } catch {
+            Write-Host "Failed to initialize auth store: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+
+    # Auth middleware — every request except the whitelist must carry a valid token
+    Add-PodeMiddleware -Name 'AuthCheck' -ScriptBlock {
+        # Resolve request path from multiple possible sources for Pode compatibility
+        $path = $WebEvent.Path
+        if (-not $path) { $path = $WebEvent.Request.Url.AbsolutePath }
+        if (-not $path) { $path = '/' }
+
+        # Unauthenticated paths — the HTML shell (/) is public; auth.js guards
+        # it client-side and all /api/* calls require a Bearer token.
+        if ($path -eq '/' -or $path -eq '/login' -or $path -like '/static/*' -or $path -like '/api/auth/login*' -or $path -eq '/api/version') {
+            return $true
+        }
+
+        # Allow internal container requests (localhost) without auth so that
+        # scripts, NLS module, and workflow engine can call the API freely.
+        # Only trust the TCP socket address — never a header, which clients can forge.
+        $socketIp = ''
+        try { $socketIp = "$($WebEvent.Request.RemoteEndPoint.Address)" } catch {}
+        if ($socketIp -eq '127.0.0.1' -or $socketIp -eq '::1') {
+            return $true
+        }
+
+        $authHeader = Get-PodeHeader -Name 'Authorization'
+        if ($authHeader -and $authHeader -match '^Bearer\s+(.+)$') {
+            $tkn = $Matches[1]
+            $store = Get-AuthStore
+            if ($store) {
+                foreach ($s in @($store.sessions)) {
+                    if ($s -and $s.token -eq $tkn) {
+                        try { if ([datetime]::Parse($s.expiresAt) -gt (Get-Date)) { return $true } } catch {}
+                    }
+                }
+                foreach ($t in @($store.apiTokens)) {
+                    if ($t -and $t.token -eq $tkn) { return $true }
+                }
+            }
+        }
+
+        # Reject — API paths get 401 JSON, everything else redirects to login
+        if ($path -like '/api/*') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Authentication required' } -StatusCode 401
+        } else {
+            Write-PodeTextResponse -Value '<html><head><meta http-equiv="refresh" content="0;url=/login"></head></html>' -ContentType 'text/html'
+        }
+        return $false
+    }
+
     # ===== STATIC ROUTE =====
     Add-PodeRoute -Method Get -Path '/' -ScriptBlock {
         Write-PodeFileResponse -Path './public/index.html' -ContentType 'text/html'
+    }
+
+    # Login page (served without auth)
+    Add-PodeRoute -Method Get -Path '/login' -ScriptBlock {
+        Write-PodeFileResponse -Path './public/login.html' -ContentType 'text/html'
+    }
+
+    # ===== AUTH API ROUTES =====
+
+    # Login — returns a session token valid for 8 hours
+    Add-PodeRoute -Method Post -Path '/api/auth/login' -ScriptBlock {
+        try {
+            $body = $WebEvent.Data
+            if (-not $body.username -or -not $body.password) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = 'Username and password are required' } -StatusCode 400
+                return
+            }
+
+            $store = Get-AuthStore
+            if (-not $store) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = 'Auth system not initialized. Check server logs.' } -StatusCode 500
+                return
+            }
+
+            $user = $store.users | Where-Object { $_.username -eq $body.username }
+            if (-not $user) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = 'Invalid credentials' } -StatusCode 401
+                return
+            }
+
+            $hash = Get-PasswordHash -Password $body.password -Salt $user.salt
+            if ($hash -ne $user.passwordHash) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = 'Invalid credentials' } -StatusCode 401
+                return
+            }
+
+            $token = New-AuthToken
+            $expiresAt = (Get-Date).AddHours(8).ToString('o')
+
+            # Prune expired sessions, add new one
+            $now = Get-Date
+            $store.sessions = @($store.sessions | Where-Object { $_ -and $_.expiresAt -and ([datetime]::Parse($_.expiresAt) -gt $now) })
+            $store.sessions += @{ token = $token; username = $body.username; createdAt = (Get-Date).ToString('o'); expiresAt = $expiresAt }
+            Save-AuthStore $store
+
+            Write-PodeJsonResponse -Value @{ success = $true; token = $token; username = $body.username; role = $user.role; expiresAt = $expiresAt }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = "Login error: $($_.Exception.Message)" } -StatusCode 500
+        }
+    }
+
+    # Logout — invalidate current session token
+    Add-PodeRoute -Method Post -Path '/api/auth/logout' -ScriptBlock {
+        $authHeader = Get-PodeHeader -Name 'Authorization'
+        if ($authHeader -and $authHeader -match '^Bearer\s+(.+)$') {
+            $tkn = $Matches[1]
+            $store = Get-AuthStore
+            $store.sessions = @($store.sessions | Where-Object { $_.token -ne $tkn })
+            Save-AuthStore $store
+        }
+        Write-PodeJsonResponse -Value @{ success = $true }
+    }
+
+    # Session check — verify current token and return user info
+    Add-PodeRoute -Method Get -Path '/api/auth/session' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if ($auth) {
+            Write-PodeJsonResponse -Value @{ success = $true; username = $auth.username; role = $auth.role }
+        } else {
+            Write-PodeJsonResponse -Value @{ success = $false } -StatusCode 401
+        }
+    }
+
+    # ===== USER MANAGEMENT ROUTES (admin only) =====
+
+    # List users (password hashes are never returned)
+    Add-PodeRoute -Method Get -Path '/api/auth/users' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin access required' } -StatusCode 403
+            return
+        }
+        $store = Get-AuthStore
+        $users = @($store.users | ForEach-Object { @{ username = $_.username; role = $_.role; createdAt = $_.createdAt } })
+        Write-PodeJsonResponse -Value @{ success = $true; users = $users }
+    }
+
+    # Create user
+    Add-PodeRoute -Method Post -Path '/api/auth/users' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin access required' } -StatusCode 403
+            return
+        }
+        $body = $WebEvent.Data
+        if (-not $body.username -or -not $body.password) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Username and password are required' } -StatusCode 400
+            return
+        }
+        $store = Get-AuthStore
+        if ($store.users | Where-Object { $_.username -eq $body.username }) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'User already exists' } -StatusCode 409
+            return
+        }
+        $salt = New-Salt
+        $hash = Get-PasswordHash -Password $body.password -Salt $salt
+        $role = if ($body.role) { $body.role } else { 'user' }
+        $store.users = @($store.users) + @(@{ username = $body.username; passwordHash = $hash; salt = $salt; role = $role; createdAt = (Get-Date).ToString('o') })
+        Save-AuthStore $store
+        Write-PodeJsonResponse -Value @{ success = $true; message = "User '$($body.username)' created" }
+    }
+
+    # Update user (password and/or role)
+    Add-PodeRoute -Method Put -Path '/api/auth/users/:username' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin access required' } -StatusCode 403
+            return
+        }
+        $target = $WebEvent.Parameters['username']
+        $body = $WebEvent.Data
+        $store = Get-AuthStore
+
+        $idx = -1
+        for ($i = 0; $i -lt @($store.users).Count; $i++) {
+            if (@($store.users)[$i].username -eq $target) { $idx = $i; break }
+        }
+        if ($idx -eq -1) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'User not found' } -StatusCode 404
+            return
+        }
+
+        if ($body.password) {
+            $salt = New-Salt
+            $hash = Get-PasswordHash -Password $body.password -Salt $salt
+            @($store.users)[$idx].passwordHash = $hash
+            @($store.users)[$idx].salt = $salt
+        }
+        if ($body.role) {
+            @($store.users)[$idx].role = $body.role
+        }
+        Save-AuthStore $store
+        Write-PodeJsonResponse -Value @{ success = $true; message = "User '$target' updated" }
+    }
+
+    # Delete user (cannot delete yourself)
+    Add-PodeRoute -Method Delete -Path '/api/auth/users/:username' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin access required' } -StatusCode 403
+            return
+        }
+        $target = $WebEvent.Parameters['username']
+        if ($target -eq $auth.username) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Cannot delete your own account' } -StatusCode 400
+            return
+        }
+        $store = Get-AuthStore
+        $before = @($store.users).Count
+        $store.users = @($store.users | Where-Object { $_.username -ne $target })
+        if (@($store.users).Count -eq $before) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'User not found' } -StatusCode 404
+            return
+        }
+        # Remove their sessions and API tokens
+        $store.sessions  = @($store.sessions  | Where-Object { $_.username  -ne $target })
+        $store.apiTokens = @($store.apiTokens | Where-Object { $_.createdBy -ne $target })
+        Save-AuthStore $store
+        Write-PodeJsonResponse -Value @{ success = $true; message = "User '$target' deleted" }
+    }
+
+    # ===== API TOKEN ROUTES (admin only) =====
+
+    # List API tokens (full token value is never returned)
+    Add-PodeRoute -Method Get -Path '/api/auth/tokens' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin access required' } -StatusCode 403
+            return
+        }
+        $store = Get-AuthStore
+        $tokens = @($store.apiTokens | ForEach-Object {
+            @{ id = $_.id; name = $_.name; createdBy = $_.createdBy; createdAt = $_.createdAt; tokenPreview = $_.token.Substring(0, 12) + '...' }
+        })
+        Write-PodeJsonResponse -Value @{ success = $true; tokens = $tokens }
+    }
+
+    # Create API token (permanent — returned only once)
+    Add-PodeRoute -Method Post -Path '/api/auth/tokens' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin access required' } -StatusCode 403
+            return
+        }
+        $body = $WebEvent.Data
+        if (-not $body.name) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Token name is required' } -StatusCode 400
+            return
+        }
+        $store = Get-AuthStore
+        $token = New-AuthToken
+        $id = [guid]::NewGuid().ToString('N').Substring(0, 12)
+        $store.apiTokens = @($store.apiTokens) + @(@{ id = $id; name = $body.name; token = $token; createdBy = $auth.username; createdAt = (Get-Date).ToString('o') })
+        Save-AuthStore $store
+        Write-PodeJsonResponse -Value @{ success = $true; id = $id; name = $body.name; token = $token; message = "Token created. Copy it now — it won't be shown again." }
+    }
+
+    # Delete API token
+    Add-PodeRoute -Method Delete -Path '/api/auth/tokens/:id' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin access required' } -StatusCode 403
+            return
+        }
+        $tokenId = $WebEvent.Parameters['id']
+        $store = Get-AuthStore
+        $before = @($store.apiTokens).Count
+        $store.apiTokens = @($store.apiTokens | Where-Object { $_.id -ne $tokenId })
+        if (@($store.apiTokens).Count -eq $before) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Token not found' } -StatusCode 404
+            return
+        }
+        Save-AuthStore $store
+        Write-PodeJsonResponse -Value @{ success = $true; message = 'API token deleted' }
     }
 
     # Version endpoint

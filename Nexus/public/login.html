@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus — Sign In</title>
+    <link rel="icon" type="image/png" href="/static/n.png">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #06090f;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #e8edf5;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 600px 400px at 20% 30%, rgba(249,115,22,0.04), transparent),
+                radial-gradient(ellipse 500px 300px at 80% 70%, rgba(96,165,250,0.03), transparent);
+            pointer-events: none;
+        }
+
+        .login-card {
+            background: #0a0f1a;
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
+            padding: 48px 40px 40px;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+            position: relative;
+        }
+
+        .login-logo {
+            height: 80px;
+            width: auto;
+            margin-bottom: 32px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: #9aadc7;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px 14px;
+            background: #0f1525;
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 8px;
+            color: #e8edf5;
+            font-family: inherit;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: rgba(249,115,22,0.4);
+        }
+
+        .error-message {
+            color: #f43f5e;
+            font-size: 13px;
+            min-height: 20px;
+            margin-bottom: 8px;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 12px;
+            background: #f97316;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .login-btn:hover { background: #ea6d0b; }
+        .login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <img src="/static/nexuslogo.png" alt="Nexus" class="login-logo">
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" autocomplete="username" required autofocus>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" autocomplete="current-password" required>
+            </div>
+            <div id="login-error" class="error-message"></div>
+            <button type="submit" class="login-btn" id="login-btn">Sign In</button>
+        </form>
+    </div>
+
+    <script>
+        // If a valid token exists, skip login
+        const existing = localStorage.getItem('nexus_auth_token');
+        if (existing) {
+            fetch('/api/auth/session', { headers: { 'Authorization': 'Bearer ' + existing } })
+                .then(r => r.json())
+                .then(d => { if (d.success) window.location.href = '/'; })
+                .catch(() => {});
+        }
+
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            const err = document.getElementById('login-error');
+            btn.disabled = true;
+            btn.textContent = 'Signing in\u2026';
+            err.textContent = '';
+
+            try {
+                const r = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('username').value,
+                        password: document.getElementById('password').value
+                    })
+                });
+                const data = await r.json();
+                if (data.success) {
+                    localStorage.setItem('nexus_auth_token', data.token);
+                    localStorage.setItem('nexus_auth_user', JSON.stringify({
+                        username: data.username,
+                        role: data.role,
+                        expiresAt: data.expiresAt
+                    }));
+                    window.location.href = '/';
+                } else {
+                    err.textContent = data.message || 'Login failed';
+                }
+            } catch (ex) {
+                err.textContent = 'Connection error: ' + ex.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Sign In';
+            }
+        });
+    </script>
+</body>
+</html>

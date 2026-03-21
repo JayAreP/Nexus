@@ -22,6 +22,7 @@ document.querySelectorAll('.nav-link').forEach(link => {
         if (panelId === 'modules') { document.getElementById('modules-output').innerHTML = ''; document.getElementById('modules-empty').style.display = 'block'; }
         if (panelId === 'sandbox') loadSandboxTerminal();
         if (panelId === 'config') loadConfig();
+        if (panelId === 'users') { loadUsers(); loadApiTokens(); }
     });
 });
 
@@ -200,6 +201,11 @@ document.getElementById('close-nls-help').addEventListener('click', () => {
 
 nlsModal.addEventListener('click', (e) => {
     if (e.target === nlsModal) nlsModal.style.display = 'none';
+});
+
+// ===== AUTH =====
+document.getElementById('logout-btn').addEventListener('click', () => {
+    NexusAuth.logout();
 });
 
 // ===== INIT =====
