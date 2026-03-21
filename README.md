@@ -74,8 +74,8 @@ services:
     volumes:
       - ./conf:/app/conf
       - ./Scripts:/app/Scripts:ro
-      - nexus-ps-modules:/usr/local/share/powershell/Modules
-      - nexus-py-packages:/usr/local/lib/python3.10/dist-packages
+      - nexus-ps-modules:/mnt/nexus/ps-modules
+      - nexus-py-packages:/mnt/nexus/py-packages
     environment:
       - POWERSHELL_TELEMETRY_OPTOUT=1
       - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
@@ -98,7 +98,8 @@ volumes:
 > **Note on volumes:**
 > - `./conf` — persists local config (`config.json`) across restarts
 > - `./Scripts` — mounted read-only so you can edit scripts without rebuilding
-> - `nexus-ps-modules` / `nexus-py-packages` — named volumes so installed modules survive container recreates
+> - `nexus-ps-modules` → `/mnt/nexus/ps-modules` — PowerShell modules survive container recreates
+> - `nexus-py-packages` → `/mnt/nexus/py-packages` — Python packages survive container recreates
 
 ### 4. Build and start
 

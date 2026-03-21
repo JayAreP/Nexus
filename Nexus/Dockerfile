@@ -56,12 +56,14 @@ RUN pwsh -Command "Install-Module -Name Az.Storage -Force -Scope AllUsers -Allow
 RUN pwsh -Command "Install-Module -Name Az.Accounts -Force -Scope AllUsers -AllowClobber"
 RUN pwsh -Command "Install-Module -Name Az.Resources -Force -Scope AllUsers -AllowClobber"
 
+# Create persistent mount points for runtime-installed modules
+RUN mkdir -p /mnt/nexus/ps-modules /mnt/nexus/py-packages
+
 # Copy application files
 COPY Server.ps1 /app/
 COPY Scripts/ /app/Scripts/
 COPY public/ /app/public/
 COPY version.txt /app/
-
 # Configure nginx as reverse proxy (single-port entry point)
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 RUN rm -f /etc/nginx/sites-enabled/default
@@ -92,5 +94,10 @@ RUN echo 'export PS1="\[\e[33m\]sandbox\[\e[0m\]:\[\e[36m\]\w\[\e[0m\]$ "' > /ho
 EXPOSE 8080
 
 ENV POWERSHELL_TELEMETRY_OPTOUT=1
+ENV PYTHONPATH="/mnt/nexus/py-packages"
+
+# Add /mnt/nexus paths to PowerShell and Python for all users (including sandbox)
+RUN echo '$env:PSModulePath += ":/mnt/nexus/ps-modules"' >> /opt/microsoft/powershell/7-lts/profile.ps1
+RUN echo '/mnt/nexus/py-packages' > /usr/lib/python3/dist-packages/nexus_paths.pth
 
 CMD ["pwsh", "-File", "/app/Server.ps1"]

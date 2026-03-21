@@ -433,6 +433,12 @@ Start-PodeServer -Threads 4 {
 
             try {
                 $result = & './Scripts/PODE/UploadScript.ps1' -Container $container -FileName $fileName -FilePath $tempPath
+                if ($result.success) {
+                    $lCache = Get-PodeState -Name 'ListCache'
+                    foreach ($k in @($lCache.Keys | Where-Object { $_ -like "$container|*" })) {
+                        $lCache.TryRemove($k, [ref]$null) | Out-Null
+                    }
+                }
                 if ($result.statusCode) {
                     Write-PodeJsonResponse -Value $result -StatusCode $result.statusCode
                 } else {
@@ -1393,10 +1399,10 @@ Start-PodeServer -Threads 4 {
         }
         try {
             if ($type -eq 'powershell') {
-                $output = Install-Module -Name $moduleName -Scope AllUsers -Force -AllowClobber -ErrorAction Stop 2>&1 | Out-String
+                $output = Save-Module -Name $moduleName -Path '/mnt/nexus/ps-modules' -Force -ErrorAction Stop 2>&1 | Out-String
                 Write-PodeJsonResponse -Value @{ success = $true; message = "PowerShell module '$moduleName' installed successfully" }
             } elseif ($type -eq 'python') {
-                $output = & pip3 install $moduleName 2>&1 | Out-String
+                $output = & pip3 install --target /mnt/nexus/py-packages $moduleName 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) {
                     Write-PodeJsonResponse -Value @{ success = $false; message = "pip3 install failed: $output" } -StatusCode 500
                 } else {

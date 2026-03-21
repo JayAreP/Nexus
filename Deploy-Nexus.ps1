@@ -90,19 +90,30 @@ foreach ($link in $storageLinks) {
     Write-Host "  Linked: $($link.Share) -> $($link.Name)"
 }
 
-# ---------- 5. Create Container App ----------
-Write-Step "Creating Container App '$AppName'..."
-
-az containerapp create -n $AppName -g $ResourceGroup --environment $EnvironmentName --image $Image --target-port 8080 --ingress external --cpu 1.0 --memory 2Gi --min-replicas 1 --max-replicas 1 --secrets azure-client-id="$AzureClientId" azure-client-secret="$AzureClientSecret" azure-tenant-id="$AzureTenantId" nexus-credential-key="$NexusCredentialKey" --env-vars POWERSHELL_TELEMETRY_OPTOUT="1" AZURE_CLIENT_ID=secretref:azure-client-id AZURE_CLIENT_SECRET=secretref:azure-client-secret AZURE_TENANT_ID=secretref:azure-tenant-id NEXUS_CREDENTIAL_KEY=secretref:nexus-credential-key --output none
-
-# ---------- 6. Attach volume mounts via ARM API ----------
-Write-Step "Attaching volume mounts..."
+# ---------- 5. Create Container App via ARM API (single PUT with volumes) ----------
+Write-Step "Creating Container App '$AppName' with volume mounts..."
 
 $subId = az account show --query id -o tsv
+$envId = "/subscriptions/$subId/resourceGroups/$ResourceGroup/providers/Microsoft.App/managedEnvironments/$EnvironmentName"
 $apiUrl = "https://management.azure.com/subscriptions/$subId/resourceGroups/$ResourceGroup/providers/Microsoft.App/containerApps/${AppName}?api-version=2024-03-01"
 
-$patchBody = @{
+$body = @{
+    location = $Location
     properties = @{
+        managedEnvironmentId = $envId
+        configuration = @{
+            ingress = @{
+                external = $true
+                targetPort = 8080
+                transport = 'auto'
+            }
+            secrets = @(
+                @{ name = 'azure-client-id';     value = $AzureClientId }
+                @{ name = 'azure-client-secret';  value = $AzureClientSecret }
+                @{ name = 'azure-tenant-id';      value = $AzureTenantId }
+                @{ name = 'nexus-credential-key'; value = $NexusCredentialKey }
+            )
+        }
         template = @{
             containers = @(
                 @{
@@ -111,31 +122,33 @@ $patchBody = @{
                     resources = @{ cpu = 1; memory = '2Gi' }
                     env = @(
                         @{ name = 'POWERSHELL_TELEMETRY_OPTOUT'; value = '1' }
-                        @{ name = 'AZURE_CLIENT_ID'; secretRef = 'azure-client-id' }
-                        @{ name = 'AZURE_CLIENT_SECRET'; secretRef = 'azure-client-secret' }
-                        @{ name = 'AZURE_TENANT_ID'; secretRef = 'azure-tenant-id' }
+                        @{ name = 'PSModulePath'; value = '/usr/local/share/powershell/Modules:/opt/microsoft/powershell/7-lts/Modules:/mnt/nexus/ps-modules' }
+                        @{ name = 'PYTHONPATH'; value = '/mnt/nexus/py-packages' }
+                        @{ name = 'AZURE_CLIENT_ID';     secretRef = 'azure-client-id' }
+                        @{ name = 'AZURE_CLIENT_SECRET';  secretRef = 'azure-client-secret' }
+                        @{ name = 'AZURE_TENANT_ID';      secretRef = 'azure-tenant-id' }
                         @{ name = 'NEXUS_CREDENTIAL_KEY'; secretRef = 'nexus-credential-key' }
                     )
                     volumeMounts = @(
-                        @{ volumeName = 'nexus-conf'; mountPath = '/app/conf' }
-                        @{ volumeName = 'ps-modules'; mountPath = '/usr/local/share/powershell/Modules' }
-                        @{ volumeName = 'py-packages'; mountPath = '/usr/local/lib/python3.10/dist-packages' }
+                        @{ volumeName = 'nexus-conf';  mountPath = '/app/conf' }
+                        @{ volumeName = 'ps-modules';  mountPath = '/mnt/nexus/ps-modules' }
+                        @{ volumeName = 'py-packages'; mountPath = '/mnt/nexus/py-packages' }
                     )
                 }
             )
             scale = @{ minReplicas = 1; maxReplicas = 1 }
             volumes = @(
-                @{ name = 'nexus-conf'; storageName = 'nexusconf'; storageType = 'AzureFile' }
-                @{ name = 'ps-modules'; storageName = 'nexuspsmodules'; storageType = 'AzureFile' }
+                @{ name = 'nexus-conf';  storageName = 'nexusconf';       storageType = 'AzureFile' }
+                @{ name = 'ps-modules';  storageName = 'nexuspsmodules';  storageType = 'AzureFile' }
                 @{ name = 'py-packages'; storageName = 'nexuspypackages'; storageType = 'AzureFile' }
             )
         }
     }
 } | ConvertTo-Json -Depth 10 -Compress
 
-$tmpBody = Join-Path $env:TEMP 'nexus-patch.json'
-$patchBody | Set-Content -Path $tmpBody -Encoding UTF8
-az rest --method PATCH --url $apiUrl --body "@$tmpBody" --output none
+$tmpBody = Join-Path $env:TEMP 'nexus-create.json'
+$body | Set-Content -Path $tmpBody -Encoding UTF8
+az rest --method PUT --url $apiUrl --body "@$tmpBody" --output none
 Remove-Item $tmpBody -Force -ErrorAction SilentlyContinue
 
 # ---------- 7. Output ----------
