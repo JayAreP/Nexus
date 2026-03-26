@@ -149,6 +149,13 @@
     box-shadow: 0 0 8px rgba(129,140,248,0.06);
 }
 
+.badge-cloudformation {
+    background: rgba(249,115,22,0.1);
+    color: #fb923c;
+    border: 1px solid rgba(249,115,22,0.2);
+    box-shadow: 0 0 8px rgba(249,115,22,0.06);
+}
+
 /* ─── Step Body ───────────────────────────────────────── */
 .step-body {
     padding-left: 36px;

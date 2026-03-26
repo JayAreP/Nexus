@@ -239,13 +239,14 @@ function Invoke-FileCheckStep {
     if (-not $fcContent) { throw "File Check '$($Step.filecheck)' not found" }
     $fc = $fcContent | ConvertFrom-Json
 
-    $updatedCommand = "FileCheck $($Step.filecheck) | Account: $($fc.storageAccount) Container: $($Params['container']) Path: $($Params['folderPath']) Timeout: $($Params['timeout'])m"
-
+    $mode = if ($Params['mode']) { $Params['mode'] } else { 'wait' }
     $containerName = $Params['container']
     $folderPath = $Params['folderPath']
-    $timeoutMinutes = [int]($Params['timeout'])
+    $minutes = [int]($Params['minutes'])
     if ([string]::IsNullOrWhiteSpace($containerName)) { throw "File Check requires 'container' parameter" }
-    if ($timeoutMinutes -le 0) { $timeoutMinutes = 5 }
+    if ($minutes -le 0) { $minutes = 5 }
+
+    $updatedCommand = "FileCheck $($Step.filecheck) | Mode: $mode Account: $($fc.storageAccount) Container: $containerName Path: $folderPath Minutes: ${minutes}m"
 
     $fcCtx = $null
     if ($fc.authType -eq 'sas') {
@@ -258,60 +259,96 @@ function Invoke-FileCheckStep {
         $folderPath.TrimStart('/').TrimEnd('/') + '/'
     } else { $null }
 
-    $baselineBlobs = @{}
-    try {
-        $existingBlobs = if ($prefix) {
-            Get-AzStorageBlob -Container $containerName -Prefix $prefix -Context $fcCtx -ErrorAction Stop
-        } else {
-            Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
-        }
-        foreach ($b in $existingBlobs) {
-            $baselineBlobs[$b.Name] = $b.LastModified
-        }
-    } catch { }
-
-    $deadline = (Get-Date).AddMinutes($timeoutMinutes)
     $newFiles = @()
 
-    [void]$AllOutput.AppendLine("@@INFO@@  Polling $($fc.storageAccount)/$containerName/$prefix every 30s (timeout: ${timeoutMinutes}m)...")
-    try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-
-    while ((Get-Date) -lt $deadline) {
-        Start-Sleep -Seconds 30
+    if ($mode -eq 'recent') {
+        # ── RECENT MODE: single scan for files modified in the last N minutes ──
+        $cutoff = (Get-Date).AddMinutes(-$minutes).ToUniversalTime()
+        [void]$AllOutput.AppendLine("@@INFO@@  Scanning $($fc.storageAccount)/$containerName/$prefix for files modified in the last ${minutes} minute(s)...")
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
         try {
-            $currentBlobs = if ($prefix) {
+            $blobs = if ($prefix) {
                 Get-AzStorageBlob -Container $containerName -Prefix $prefix -Context $fcCtx -ErrorAction Stop
             } else {
                 Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
             }
         } catch {
-            [void]$AllOutput.AppendLine("@@ERR@@  Poll error: $($_.Exception.Message)")
-            try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-            continue
+            throw "File Check scan error: $($_.Exception.Message)"
         }
 
-        $newFiles = @()
-        foreach ($b in $currentBlobs) {
-            if (-not $baselineBlobs.ContainsKey($b.Name)) {
-                $newFiles += "$containerName/$($b.Name)"
-            } elseif ($b.LastModified -gt $baselineBlobs[$b.Name]) {
+        foreach ($b in $blobs) {
+            $lastMod = $b.LastModified.UtcDateTime
+            if ($lastMod -ge $cutoff) {
                 $newFiles += "$containerName/$($b.Name)"
             }
         }
 
-        if ($newFiles.Count -gt 0) {
-            [void]$AllOutput.AppendLine("@@INFO@@  Detected $($newFiles.Count) new/updated file(s)")
-            break
+        if ($newFiles.Count -eq 0) {
+            [void]$AllOutput.AppendLine("@@INFO@@  No files modified in the last ${minutes} minute(s)")
+            try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+            throw "File Check found no files modified in the last ${minutes} minute(s) in $($fc.storageAccount)/$containerName/$prefix"
         }
 
-        $remaining = [math]::Round(($deadline - (Get-Date)).TotalSeconds)
-        [void]$AllOutput.AppendLine("@@INFO@@  No changes yet... ${remaining}s remaining")
+        [void]$AllOutput.AppendLine("@@INFO@@  Found $($newFiles.Count) file(s) modified in the last ${minutes} minute(s)")
         try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
-    }
 
-    if ($newFiles.Count -eq 0) {
-        throw "File Check timed out after ${timeoutMinutes} minute(s) — no new files detected in $($fc.storageAccount)/$containerName/$prefix"
+    } else {
+        # ── WAIT MODE: poll for new/modified files until timeout (original behavior) ──
+        $baselineBlobs = @{}
+        try {
+            $existingBlobs = if ($prefix) {
+                Get-AzStorageBlob -Container $containerName -Prefix $prefix -Context $fcCtx -ErrorAction Stop
+            } else {
+                Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
+            }
+            foreach ($b in $existingBlobs) {
+                $baselineBlobs[$b.Name] = $b.LastModified
+            }
+        } catch { }
+
+        $deadline = (Get-Date).AddMinutes($minutes)
+
+        [void]$AllOutput.AppendLine("@@INFO@@  Polling $($fc.storageAccount)/$containerName/$prefix every 30s (timeout: ${minutes}m)...")
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 30
+
+            try {
+                $currentBlobs = if ($prefix) {
+                    Get-AzStorageBlob -Container $containerName -Prefix $prefix -Context $fcCtx -ErrorAction Stop
+                } else {
+                    Get-AzStorageBlob -Container $containerName -Context $fcCtx -ErrorAction Stop
+                }
+            } catch {
+                [void]$AllOutput.AppendLine("@@ERR@@  Poll error: $($_.Exception.Message)")
+                try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+                continue
+            }
+
+            $newFiles = @()
+            foreach ($b in $currentBlobs) {
+                if (-not $baselineBlobs.ContainsKey($b.Name)) {
+                    $newFiles += "$containerName/$($b.Name)"
+                } elseif ($b.LastModified -gt $baselineBlobs[$b.Name]) {
+                    $newFiles += "$containerName/$($b.Name)"
+                }
+            }
+
+            if ($newFiles.Count -gt 0) {
+                [void]$AllOutput.AppendLine("@@INFO@@  Detected $($newFiles.Count) new/updated file(s)")
+                break
+            }
+
+            $remaining = [math]::Round(($deadline - (Get-Date)).TotalSeconds)
+            [void]$AllOutput.AppendLine("@@INFO@@  No changes yet... ${remaining}s remaining")
+            try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+        }
+
+        if ($newFiles.Count -eq 0) {
+            throw "File Check timed out after ${minutes} minute(s) — no new files detected in $($fc.storageAccount)/$containerName/$prefix"
+        }
     }
 
     $resultObj = @{ files = $newFiles }
@@ -320,6 +357,154 @@ function Invoke-FileCheckStep {
     try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
 
     return @{ stdOut = $stdOut; output = $stdOut; command = $updatedCommand }
+}
+
+function Invoke-CloudFormationStep {
+    param([object]$Step, [hashtable]$Params, [System.Text.StringBuilder]$AllOutput, [string]$ConsoleTempFile,
+          [string]$Timestamp, [int]$StepIndex)
+
+    # ── Resolve AWS credential ──
+    $credName = $Params['credential']
+    if ([string]::IsNullOrWhiteSpace($credName)) { throw "CloudFormation step requires 'credential' parameter" }
+
+    $credResult = & './Scripts/PODE/ResolveCredential.ps1' -Name $credName
+    if (-not $credResult.success) { throw "Failed to resolve credential '$credName': $($credResult.message)" }
+    $credObj = $credResult.credential
+    $credValues = $credObj.values
+    if (-not $credValues.accessKeyId -or -not $credValues.secretAccessKey) {
+        throw "Credential '$credName' is not an AWS credential (missing accessKeyId/secretAccessKey)"
+    }
+
+    $stackName   = $Params['stackName']
+    $region      = if ($Params['region']) { $Params['region'] } elseif ($credValues.region) { $credValues.region } else { 'us-east-1' }
+    $awsAccount  = $Params['awsAccountId']
+    if ([string]::IsNullOrWhiteSpace($stackName)) { throw "CloudFormation step requires 'stackName' parameter" }
+
+    # ── Download template from blob to temp file ──
+    $templateName = $Step.script
+    $templateContent = Read-Blob -Container 'nexus-cloudformation' -BlobPath $templateName
+    if (-not $templateContent) { throw "CloudFormation template '$templateName' not found in nexus-cloudformation" }
+
+    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-cfn-$Timestamp-step$StepIndex"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    $templatePath = Join-Path $tempDir $templateName
+    [System.IO.File]::WriteAllText($templatePath, $templateContent, [System.Text.Encoding]::UTF8)
+
+    $updatedCommand = "aws cloudformation deploy --stack-name $stackName --template-file $templateName --region $region"
+
+    # ── Set AWS environment variables ──
+    $env:AWS_ACCESS_KEY_ID     = $credValues.accessKeyId
+    $env:AWS_SECRET_ACCESS_KEY = $credValues.secretAccessKey
+    $env:AWS_DEFAULT_REGION    = $region
+    if ($credValues.sessionToken) { $env:AWS_SESSION_TOKEN = $credValues.sessionToken }
+
+    try {
+        # ── Verify identity and optionally check account ──
+        [void]$AllOutput.AppendLine("@@INFO@@  Authenticating with credential '$credName' in region '$region'...")
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        $identity = aws sts get-caller-identity --output json 2>&1
+        $identityObj = $null
+        try { $identityObj = $identity | ConvertFrom-Json -ErrorAction Stop } catch { }
+        if (-not $identityObj -or -not $identityObj.Account) {
+            throw "AWS authentication failed: $identity"
+        }
+
+        [void]$AllOutput.AppendLine("@@INFO@@  Authenticated as $($identityObj.Arn) (Account: $($identityObj.Account))")
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        # Account guard — if operator specified an account ID, verify it matches
+        if (![string]::IsNullOrWhiteSpace($awsAccount) -and $identityObj.Account -ne $awsAccount) {
+            throw "Account mismatch: credential resolved to account $($identityObj.Account) but step expects $awsAccount"
+        }
+
+        # ── Build parameter overrides ──
+        $reservedKeys = @('credential', 'awsAccountId', 'region', 'stackName')
+        $cfnParams = @()
+        foreach ($key in $Params.Keys) {
+            if ($key -in $reservedKeys) { continue }
+            $cfnParams += "$key=$($Params[$key])"
+        }
+
+        # ── Execute CloudFormation deploy ──
+        [void]$AllOutput.AppendLine("@@INFO@@  Deploying stack '$stackName' with template '$templateName'...")
+        if ($cfnParams.Count -gt 0) {
+            [void]$AllOutput.AppendLine("@@INFO@@  Parameters: $($cfnParams -join ', ')")
+        }
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        $deployArgs = @(
+            'cloudformation', 'deploy',
+            '--stack-name', $stackName,
+            '--template-file', $templatePath,
+            '--capabilities', 'CAPABILITY_IAM', 'CAPABILITY_NAMED_IAM', 'CAPABILITY_AUTO_EXPAND',
+            '--no-fail-on-empty-changeset',
+            '--output', 'json'
+        )
+        if ($cfnParams.Count -gt 0) {
+            $deployArgs += '--parameter-overrides'
+            $deployArgs += $cfnParams
+        }
+
+        $deployOutput = & aws @deployArgs 2>&1
+        $deployExitCode = $LASTEXITCODE
+
+        foreach ($ln in ($deployOutput -split "`n")) {
+            if ($ln -match 'error|failed|rollback' ) {
+                [void]$AllOutput.AppendLine("@@ERR@@  $ln")
+            } else {
+                [void]$AllOutput.AppendLine("@@OUT@@$ln")
+            }
+        }
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        if ($deployExitCode -ne 0) {
+            throw "CloudFormation deploy failed (exit code $deployExitCode): $deployOutput"
+        }
+
+        [void]$AllOutput.AppendLine("@@INFO@@  Stack '$stackName' deployed successfully. Fetching outputs...")
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        # ── Fetch stack outputs for variable registration ──
+        $describeOutput = aws cloudformation describe-stacks --stack-name $stackName --query "Stacks[0].Outputs" --output json 2>&1
+        $stackOutputs = @{}
+        try {
+            $outputArr = $describeOutput | ConvertFrom-Json -ErrorAction Stop
+            if ($outputArr) {
+                foreach ($o in $outputArr) {
+                    $stackOutputs[$o.OutputKey] = $o.OutputValue
+                    [void]$AllOutput.AppendLine("@@INFO@@  Output: $($o.OutputKey) = $($o.OutputValue)")
+                }
+            }
+        } catch {
+            [void]$AllOutput.AppendLine("@@INFO@@  No stack outputs or unable to parse outputs")
+        }
+
+        # Build result JSON — stack outputs become step variables
+        $resultObj = @{
+            stackName = $stackName
+            region    = $region
+            account   = $identityObj.Account
+            status    = 'DEPLOYED'
+        }
+        foreach ($key in $stackOutputs.Keys) {
+            $resultObj[$key] = $stackOutputs[$key]
+        }
+
+        $stdOut = $resultObj | ConvertTo-Json -Depth 10
+        foreach ($ln in $stdOut -split "`n") { [void]$AllOutput.AppendLine("@@OUT@@$ln") }
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        return @{ stdOut = $stdOut; output = $stdOut; command = $updatedCommand }
+
+    } finally {
+        # ── Clean up AWS env vars and temp files ──
+        Remove-Item Env:\AWS_ACCESS_KEY_ID -ErrorAction SilentlyContinue
+        Remove-Item Env:\AWS_SECRET_ACCESS_KEY -ErrorAction SilentlyContinue
+        Remove-Item Env:\AWS_DEFAULT_REGION -ErrorAction SilentlyContinue
+        Remove-Item Env:\AWS_SESSION_TOKEN -ErrorAction SilentlyContinue
+        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 # ── End step runner functions ────────────────────────────────────────
@@ -493,6 +678,9 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
             'filecheck' {
                 "FileCheck $($step.filecheck) | Container: $($params['container']) Path: $($params['folderPath']) Timeout: $($params['timeout'])m"
             }
+            'cloudformation' {
+                "aws cloudformation deploy --stack-name $($params['stackName']) --template $($step.script) --region $($params['region'])"
+            }
         }
 
         # Log command to console, engine log, and step log before execution
@@ -515,8 +703,9 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
             'python'     { Invoke-PythonStep @runnerArgs }
             'shell'      { Invoke-ShellStep @runnerArgs }
             'terraform'  { Invoke-TerraformStep @runnerArgs }
-            'webhook'    { Invoke-WebhookStep @runnerArgs }
-            'filecheck'  { Invoke-FileCheckStep @runnerArgs }
+            'webhook'         { Invoke-WebhookStep @runnerArgs }
+            'filecheck'       { Invoke-FileCheckStep @runnerArgs }
+            'cloudformation'  { Invoke-CloudFormationStep @runnerArgs }
         }
         $stdOut     = $result.stdOut
         $stdErr     = $result.stdErr

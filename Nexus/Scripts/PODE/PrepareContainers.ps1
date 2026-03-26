@@ -17,6 +17,7 @@ try {
         'nexus-config',
         'nexus-powershell',
         'nexus-terraform',
+        'nexus-cloudformation',
         'nexus-python',
         'nexus-shell',
         'nexus-webhooks',

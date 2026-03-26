@@ -205,6 +205,114 @@ switch ($Type) {
             $result += $entry
         }
     }
+
+    'cloudformation' {
+        # Parse CloudFormation YAML/JSON Parameters section
+        # Strategy: try JSON first, then YAML
+        $parsed = $null
+
+        # JSON attempt
+        try {
+            $parsed = $Content | ConvertFrom-Json -ErrorAction Stop
+        } catch { }
+
+        if (-not $parsed) {
+            # YAML attempt — requires powershell-yaml module or manual parsing
+            # Use regex-based extraction for YAML Parameters block (robust, no module dependency)
+            # Match each top-level parameter under the Parameters: key
+            if ($Content -match '(?m)^Parameters:\s*$') {
+                # Extract the Parameters block — everything between "Parameters:" and the next top-level key
+                if ($Content -match '(?s)(?m)^Parameters:\s*\n(.*?)(?=\n\S|\z)') {
+                    $paramBlock = $Matches[1]
+                    # Split into individual parameter entries by lines starting with exactly 2 spaces + word
+                    $paramEntries = [regex]::Matches($paramBlock, '(?m)^  (\w[\w\-]*):\s*\n((?:    .*\n?)*)')
+                    foreach ($pe in $paramEntries) {
+                        $paramName = $pe.Groups[1].Value
+                        $paramBody = $pe.Groups[2].Value
+                        $defaultValue = ''
+                        $hasDefault = $false
+                        $isMandatory = $true
+                        $paramType = ''
+                        $validateSet = @()
+
+                        # Extract Type
+                        if ($paramBody -match "(?m)^\s+Type:\s*['""]?(.+?)['""]?\s*$") {
+                            $paramType = $Matches[1].Trim().Trim("'`"")
+                        }
+
+                        # Extract Default
+                        if ($paramBody -match "(?m)^\s+Default:\s*['""]?(.*?)['""]?\s*$") {
+                            $defaultValue = $Matches[1].Trim().Trim("'`"")
+                            $hasDefault = $true
+                            $isMandatory = $false
+                        }
+
+                        # Extract AllowedValues (YAML list)
+                        if ($paramBody -match '(?s)AllowedValues:\s*\n((?:\s+-\s+.*\n?)*)') {
+                            $avBlock = $Matches[1]
+                            $avMatches = [regex]::Matches($avBlock, "(?m)^\s+-\s+['""]?(.*?)['""]?\s*$")
+                            foreach ($av in $avMatches) {
+                                $validateSet += $av.Groups[1].Value
+                            }
+                        }
+
+                        # Extract NoEcho
+                        $noEcho = $false
+                        if ($paramBody -match '(?mi)^\s+NoEcho:\s*true') {
+                            $noEcho = $true
+                        }
+
+                        $entry = @{
+                            name      = $paramName
+                            mandatory = $isMandatory
+                            default   = $defaultValue
+                        }
+                        if ($paramType) { $entry.type = $paramType }
+                        if ($validateSet.Count -gt 0) { $entry.validateSet = $validateSet }
+                        if ($noEcho) { $entry.type = 'password' }
+                        $result += $entry
+                    }
+                }
+            }
+        }
+
+        if ($parsed) {
+            # JSON CloudFormation template
+            $parameters = $null
+            if ($parsed.Parameters) {
+                $parameters = $parsed.Parameters
+            }
+            if ($parameters) {
+                foreach ($prop in $parameters.PSObject.Properties) {
+                    $paramName = $prop.Name
+                    $paramDef = $prop.Value
+                    $defaultValue = ''
+                    $hasDefault = $false
+                    $paramType = ''
+                    $validateSet = @()
+
+                    if ($paramDef.Type) { $paramType = [string]$paramDef.Type }
+                    if ($null -ne $paramDef.Default) {
+                        $defaultValue = [string]$paramDef.Default
+                        $hasDefault = $true
+                    }
+                    if ($paramDef.AllowedValues) {
+                        $validateSet = @($paramDef.AllowedValues | ForEach-Object { [string]$_ })
+                    }
+
+                    $entry = @{
+                        name      = $paramName
+                        mandatory = (-not $hasDefault)
+                        default   = $defaultValue
+                    }
+                    if ($paramType) { $entry.type = $paramType }
+                    if ($validateSet.Count -gt 0) { $entry.validateSet = $validateSet }
+                    if ($paramDef.NoEcho -eq $true) { $entry.type = 'password' }
+                    $result += $entry
+                }
+            }
+        }
+    }
 }
 
 return @{
