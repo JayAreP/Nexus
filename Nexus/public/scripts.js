@@ -204,7 +204,7 @@ async function previewScript(type, name) {
 }
 
 // ===== SCRIPT EDITOR =====
-const aceModeMap = { powershell: 'powershell', python: 'python', shell: 'sh', terraform: 'terraform', webhook: 'json', filecheck: 'json', cloudformation: 'yaml' };
+const aceModeMap = { powershell: 'powershell', python: 'python', shell: 'sh', terraform: 'terraform', webhook: 'json', filecheck: 'json', cloudformation: 'yaml', armtemplate: 'json' };
 let aceEditor = null;
 let editorScriptType = '';
 let editorScriptName = '';

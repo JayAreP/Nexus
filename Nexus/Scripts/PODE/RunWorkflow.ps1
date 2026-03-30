@@ -507,6 +507,154 @@ function Invoke-CloudFormationStep {
     }
 }
 
+function Invoke-ArmTemplateStep {
+    param([object]$Step, [hashtable]$Params, [System.Text.StringBuilder]$AllOutput, [string]$ConsoleTempFile,
+          [string]$Timestamp, [int]$StepIndex)
+
+    # ── Resolve Azure Service Principal credential ──
+    $credName = $Params['credential']
+    if ([string]::IsNullOrWhiteSpace($credName)) { throw "ARM Template step requires 'credential' parameter" }
+
+    $credResult = & './Scripts/PODE/ResolveCredential.ps1' -Name $credName
+    if (-not $credResult.success) { throw "Failed to resolve credential '$credName': $($credResult.message)" }
+    $credObj = $credResult.credential
+    $credValues = $credObj.values
+    if (-not $credValues.tenantId -or -not $credValues.clientId -or -not $credValues.clientSecret) {
+        throw "Credential '$credName' is not an Azure Service Principal (missing tenantId/clientId/clientSecret)"
+    }
+
+    $subscriptionId = $Params['subscriptionId']
+    $resourceGroup  = $Params['resourceGroup']
+    $deploymentName = $Params['deploymentName']
+    if ([string]::IsNullOrWhiteSpace($subscriptionId)) { throw "ARM Template step requires 'subscriptionId' parameter" }
+    if ([string]::IsNullOrWhiteSpace($resourceGroup))  { throw "ARM Template step requires 'resourceGroup' parameter" }
+    if ([string]::IsNullOrWhiteSpace($deploymentName))  { $deploymentName = "nexus-$Timestamp-step$StepIndex" }
+
+    # ── Download template from blob to temp file ──
+    $templateName = $Step.script
+    $templateContent = Read-Blob -Container 'nexus-armtemplate' -BlobPath $templateName
+    if (-not $templateContent) { throw "ARM template '$templateName' not found in nexus-armtemplate" }
+
+    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-arm-$Timestamp-step$StepIndex"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+    $templatePath = Join-Path $tempDir $templateName
+    [System.IO.File]::WriteAllText($templatePath, $templateContent, [System.Text.Encoding]::UTF8)
+
+    $updatedCommand = "az deployment group create --name $deploymentName --resource-group $resourceGroup --template-file $templateName"
+
+    try {
+        # ── Authenticate with Azure Service Principal ──
+        [void]$AllOutput.AppendLine("@@INFO@@  Authenticating with Service Principal '$credName' (tenant: $($credValues.tenantId))...")
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        $loginOutput = az login --service-principal --username $credValues.clientId --password $credValues.clientSecret --tenant $credValues.tenantId --output json 2>&1
+        $loginExitCode = $LASTEXITCODE
+        if ($loginExitCode -ne 0) {
+            throw "Azure login failed (exit code $loginExitCode): $loginOutput"
+        }
+
+        [void]$AllOutput.AppendLine("@@INFO@@  Authenticated successfully. Setting subscription '$subscriptionId'...")
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        # ── Set subscription ──
+        $subOutput = az account set --subscription $subscriptionId 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to set subscription '$subscriptionId': $subOutput"
+        }
+
+        # ── Build parameter overrides ──
+        $reservedKeys = @('credential', 'subscriptionId', 'resourceGroup', 'deploymentName')
+        $armParams = @{}
+        foreach ($key in $Params.Keys) {
+            if ($key -in $reservedKeys) { continue }
+            if ([string]::IsNullOrWhiteSpace($Params[$key])) { continue }
+            $armParams[$key] = @{ value = $Params[$key] }
+        }
+
+        # Write parameters to a temp file (ARM expects JSON parameters object)
+        $paramFilePath = $null
+        if ($armParams.Count -gt 0) {
+            $paramObj = @{
+                '$schema'      = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
+                contentVersion = '1.0.0.0'
+                parameters     = $armParams
+            }
+            $paramFilePath = Join-Path $tempDir 'parameters.json'
+            $paramObj | ConvertTo-Json -Depth 10 | Set-Content -Path $paramFilePath -Encoding UTF8
+        }
+
+        # ── Execute ARM deployment ──
+        [void]$AllOutput.AppendLine("@@INFO@@  Deploying '$deploymentName' to resource group '$resourceGroup'...")
+        if ($armParams.Count -gt 0) {
+            [void]$AllOutput.AppendLine("@@INFO@@  Parameters: $($armParams.Keys -join ', ')")
+        }
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        $deployArgs = @(
+            'deployment', 'group', 'create',
+            '--name', $deploymentName,
+            '--resource-group', $resourceGroup,
+            '--template-file', $templatePath,
+            '--output', 'json'
+        )
+        if ($paramFilePath) {
+            $deployArgs += '--parameters'
+            $deployArgs += "@$paramFilePath"
+        }
+
+        $deployOutput = & az @deployArgs 2>&1
+        $deployExitCode = $LASTEXITCODE
+
+        foreach ($ln in ($deployOutput -split "`n")) {
+            if ($ln -match 'error|failed' ) {
+                [void]$AllOutput.AppendLine("@@ERR@@  $ln")
+            } else {
+                [void]$AllOutput.AppendLine("@@OUT@@$ln")
+            }
+        }
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        if ($deployExitCode -ne 0) {
+            throw "ARM deployment failed (exit code $deployExitCode): $deployOutput"
+        }
+
+        [void]$AllOutput.AppendLine("@@INFO@@  Deployment '$deploymentName' completed. Extracting outputs...")
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        # ── Extract deployment outputs for variable registration ──
+        $resultObj = @{
+            deploymentName = $deploymentName
+            resourceGroup  = $resourceGroup
+            subscriptionId = $subscriptionId
+            status         = 'Succeeded'
+        }
+
+        # Parse the deployment JSON output for outputs
+        try {
+            $deployJson = $deployOutput | ConvertFrom-Json -ErrorAction Stop
+            if ($deployJson.properties -and $deployJson.properties.outputs) {
+                foreach ($prop in $deployJson.properties.outputs.PSObject.Properties) {
+                    $resultObj[$prop.Name] = [string]$prop.Value.value
+                    [void]$AllOutput.AppendLine("@@INFO@@  Output: $($prop.Name) = $($prop.Value.value)")
+                }
+            }
+        } catch {
+            [void]$AllOutput.AppendLine("@@INFO@@  Unable to parse deployment outputs")
+        }
+
+        $stdOut = $resultObj | ConvertTo-Json -Depth 10
+        foreach ($ln in $stdOut -split "`n") { [void]$AllOutput.AppendLine("@@OUT@@$ln") }
+        try { [System.IO.File]::WriteAllText($ConsoleTempFile, $AllOutput.ToString(), [System.Text.Encoding]::UTF8) } catch { }
+
+        return @{ stdOut = $stdOut; output = $stdOut; command = $updatedCommand }
+
+    } finally {
+        # ── Clean up: logout and remove temp files ──
+        az logout 2>$null
+        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 # ── End step runner functions ────────────────────────────────────────
 
 $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
@@ -681,6 +829,9 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
             'cloudformation' {
                 "aws cloudformation deploy --stack-name $($params['stackName']) --template $($step.script) --region $($params['region'])"
             }
+            'armtemplate' {
+                "az deployment group create --name $($params['deploymentName']) --resource-group $($params['resourceGroup']) --template $($step.script)"
+            }
         }
 
         # Log command to console, engine log, and step log before execution
@@ -706,6 +857,7 @@ for ($i = $startStep; $i -lt $endStep; $i++) {
             'webhook'         { Invoke-WebhookStep @runnerArgs }
             'filecheck'       { Invoke-FileCheckStep @runnerArgs }
             'cloudformation'  { Invoke-CloudFormationStep @runnerArgs }
+            'armtemplate'     { Invoke-ArmTemplateStep @runnerArgs }
         }
         $stdOut     = $result.stdOut
         $stdErr     = $result.stdErr

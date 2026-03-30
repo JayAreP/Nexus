@@ -18,6 +18,7 @@ try {
         'nexus-powershell',
         'nexus-terraform',
         'nexus-cloudformation',
+        'nexus-armtemplate',
         'nexus-python',
         'nexus-shell',
         'nexus-webhooks',

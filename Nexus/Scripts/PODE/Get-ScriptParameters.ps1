@@ -206,6 +206,51 @@ switch ($Type) {
         }
     }
 
+    'armtemplate' {
+        # Parse ARM template JSON parameters section
+        try {
+            $parsed = $Content | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            # Not valid JSON
+            break
+        }
+
+        $parameters = $null
+        if ($parsed.parameters) { $parameters = $parsed.parameters }
+        elseif ($parsed.'$schema' -and $parsed.parameters) { $parameters = $parsed.parameters }
+
+        if ($parameters) {
+            foreach ($prop in $parameters.PSObject.Properties) {
+                $paramName = $prop.Name
+                $paramDef = $prop.Value
+                $defaultValue = ''
+                $hasDefault = $false
+                $paramType = ''
+                $validateSet = @()
+
+                if ($paramDef.type) { $paramType = [string]$paramDef.type }
+                if ($null -ne $paramDef.defaultValue) {
+                    $defaultValue = [string]$paramDef.defaultValue
+                    $hasDefault = $true
+                }
+                if ($paramDef.allowedValues) {
+                    $validateSet = @($paramDef.allowedValues | ForEach-Object { [string]$_ })
+                }
+
+                $entry = @{
+                    name      = $paramName
+                    mandatory = (-not $hasDefault)
+                    default   = $defaultValue
+                }
+                if ($paramType) { $entry.type = $paramType }
+                if ($validateSet.Count -gt 0) { $entry.validateSet = $validateSet }
+                # secureString / secureObject → password field
+                if ($paramType -match '^secure') { $entry.type = 'password' }
+                $result += $entry
+            }
+        }
+    }
+
     'cloudformation' {
         # Parse CloudFormation YAML/JSON Parameters section
         # Strategy: try JSON first, then YAML

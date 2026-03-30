@@ -200,6 +200,13 @@ function renderLadder() {
                 ).join('');
                 valueField = `<select class="kv-value" style="flex: 1; padding: 6px 10px; border: 1px solid #cbd5e0; font-size: 13px; font-family: inherit; color: var(--text-primary);"><option value="">-- Select AWS Credential --</option>${opts}</select>`;
             }
+            // Credential dropdown for armtemplate credential param
+            if (step.type === 'armtemplate' && kv.key === 'credential') {
+                const opts = (window._azureSpCredentialCache || []).map(n =>
+                    `<option value="${escHtml(n)}"${n === (kv.value || '') ? ' selected' : ''}>${escHtml(n)}</option>`
+                ).join('');
+                valueField = `<select class="kv-value" style="flex: 1; padding: 6px 10px; border: 1px solid #cbd5e0; font-size: 13px; font-family: inherit; color: var(--text-primary);"><option value="">-- Select Azure Service Principal --</option>${opts}</select>`;
+            }
             kvHtml += `
                 <div class="kv-pair${kv.type === 'array' ? ' kv-pair-array' : ''}" data-kv-index="${ki}" style="position: relative;">
                     ${mandatoryIcon}
@@ -259,7 +266,7 @@ function renderLadder() {
                 ` : ''}
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
                     <label style="font-size: 12px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Parameters</label>
-                    ${['powershell','shell','python','terraform','cloudformation'].includes(step.type) && step.script ? `<button class="btn btn-secondary btn-sm" style="font-size: 10px; padding: 2px 8px;" onclick="autoParams(${idx})">Auto</button>` : ''}
+                    ${['powershell','shell','python','terraform','cloudformation','armtemplate'].includes(step.type) && step.script ? `<button class="btn btn-secondary btn-sm" style="font-size: 10px; padding: 2px 8px;" onclick="autoParams(${idx})">Auto</button>` : ''}
                 </div>
                 <div class="kv-list">${kvHtml}</div>
                 <button class="add-kv-btn" onclick="addKV(${idx})">+ Add Key/Value</button>
@@ -403,6 +410,14 @@ async function autoParams(stepIdx) {
                 return existing || { key, value: '' };
             });
             step.params = [...reservedParams, ...detectedParams];
+        } else if (step.type === 'armtemplate') {
+            // Preserve reserved ARM Template params, append template params after
+            const reserved = ['credential', 'subscriptionId', 'resourceGroup', 'deploymentName'];
+            const reservedParams = reserved.map(key => {
+                const existing = (step.params || []).find(p => p.key === key);
+                return existing || { key, value: '' };
+            });
+            step.params = [...reservedParams, ...detectedParams];
         } else {
             step.params = detectedParams;
         }
@@ -533,22 +548,24 @@ document.getElementById('close-browse-modal').addEventListener('click', () => {
     document.getElementById('browse-modal').style.display = 'none';
 });
 
-// ===== AWS CREDENTIAL CACHE (for cloudformation step dropdowns) =====
+// ===== CREDENTIAL CACHES (for cloudformation + armtemplate step dropdowns) =====
 window._awsCredentialCache = [];
-async function loadAwsCredentialCache() {
+window._azureSpCredentialCache = [];
+async function loadCredentialCaches() {
     try {
         const r = await fetch('/api/credentials');
         const data = await r.json();
         if (data.success && data.credentials) {
             window._awsCredentialCache = data.credentials.filter(c => c.type === 'aws').map(c => c.name);
+            window._azureSpCredentialCache = data.credentials.filter(c => c.type === 'azureserviceprincipal').map(c => c.name);
         }
     } catch (err) { }
 }
-// Refresh cache when workflow editor opens
+// Refresh caches when workflow editor opens
 const _origEditWorkflow = editWorkflow;
-editWorkflow = async function(name) { await loadAwsCredentialCache(); return _origEditWorkflow(name); };
+editWorkflow = async function(name) { await loadCredentialCaches(); return _origEditWorkflow(name); };
 const _origNewWorkflowBtn = document.getElementById('new-workflow-btn');
-_origNewWorkflowBtn.addEventListener('click', () => loadAwsCredentialCache(), true);
+_origNewWorkflowBtn.addEventListener('click', () => loadCredentialCaches(), true);
 
 function addBreakpoint(stepIdx) {
     readLadderState();
@@ -663,6 +680,21 @@ document.getElementById('step-type-select').addEventListener('change', async (e)
                 });
             }
         } catch (err) { }
+    } else if (type === 'armtemplate') {
+        scriptGroup.style.display = 'block';
+        scriptGroup.querySelector('label').textContent = 'Template';
+        try {
+            const r = await fetch('/api/scripts/armtemplate');
+            const data = await r.json();
+            if (data.success && data.scripts) {
+                data.scripts.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.name;
+                    opt.textContent = s.name;
+                    scriptSelect.appendChild(opt);
+                });
+            }
+        } catch (err) { }
     } else if (type) {
         scriptGroup.style.display = 'block';
         scriptGroup.querySelector('label').textContent = 'Script';
@@ -714,6 +746,15 @@ document.getElementById('confirm-add-step-btn').addEventListener('click', () => 
             { key: 'awsAccountId', value: '' },
             { key: 'region', value: '' },
             { key: 'stackName', value: '' }
+        ];
+    } else if (type === 'armtemplate') {
+        newStep.script = resource;
+        // Pre-populate ARM Template step params — credential, subscription, resource group, deployment name
+        newStep.params = [
+            { key: 'credential', value: '' },
+            { key: 'subscriptionId', value: '' },
+            { key: 'resourceGroup', value: '' },
+            { key: 'deploymentName', value: '' }
         ];
     } else {
         newStep.script = resource;

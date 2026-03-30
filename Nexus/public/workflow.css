@@ -156,6 +156,13 @@
     box-shadow: 0 0 8px rgba(249,115,22,0.06);
 }
 
+.badge-armtemplate {
+    background: rgba(56,145,255,0.1);
+    color: #60a5fa;
+    border: 1px solid rgba(56,145,255,0.2);
+    box-shadow: 0 0 8px rgba(56,145,255,0.06);
+}
+
 /* ─── Step Body ───────────────────────────────────────── */
 .step-body {
     padding-left: 36px;
