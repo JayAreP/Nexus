@@ -45,11 +45,23 @@ try {
     Write-Host "Failed to start sandbox terminal: $($_.Exception.Message)" -ForegroundColor Red
 }
 
+## ===== TLS CERTIFICATE =====
+# Generate self-signed cert if no cert exists
+$certPath = './conf/cert.pem'
+$keyPath = './conf/key.pem'
+if (-not (Test-Path $certPath) -or -not (Test-Path $keyPath)) {
+    Write-Host "No TLS certificate found - generating self-signed certificate..." -ForegroundColor Yellow
+    & openssl req -x509 -newkey rsa:2048 -keyout $keyPath -out $certPath -days 365 -nodes -subj '/CN=nexus/O=GH2AZ/C=US' 2>&1 | Out-Null
+    Write-Host "Self-signed TLS certificate generated (valid 365 days)" -ForegroundColor Green
+} else {
+    Write-Host "TLS certificate found at $certPath" -ForegroundColor Green
+}
+
 ## ===== NGINX REVERSE PROXY =====
-# Start nginx as the single-port front door (port 8080 → PODE 8081 + ttyd 7681)
+# Start nginx as the single-port front door (port 8080 HTTPS → PODE 8081 + ttyd 7681)
 try {
     Start-Process -FilePath 'nginx' -NoNewWindow
-    Write-Host "nginx reverse proxy started on port 8080" -ForegroundColor Green
+    Write-Host "nginx reverse proxy started on port 8080 (HTTPS)" -ForegroundColor Green
 } catch {
     Write-Host "Failed to start nginx: $($_.Exception.Message)" -ForegroundColor Red
 }
@@ -314,10 +326,12 @@ Start-PodeServer -Threads 4 {
 
     function Get-PasswordHash {
         param([string]$Password, [string]$Salt)
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes("${Salt}:${Password}")
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $hash = $sha.ComputeHash($bytes)
-        $sha.Dispose()
+        $saltBytes = [Convert]::FromBase64String($Salt)
+        $pbkdf2 = [System.Security.Cryptography.Rfc2898DeriveBytes]::new(
+            $Password, $saltBytes, 100000, [System.Security.Cryptography.HashAlgorithmName]::SHA256
+        )
+        $hash = $pbkdf2.GetBytes(32)
+        $pbkdf2.Dispose()
         return [Convert]::ToBase64String($hash)
     }
 
@@ -364,20 +378,10 @@ Start-PodeServer -Threads 4 {
         return $null
     }
 
-    # Initialize auth store with default nexus/nexus user on first run
-    if (-not (Test-Path './conf/auth.json')) {
-        try {
-            $defSalt = New-Salt
-            $defHash = Get-PasswordHash -Password 'nexus' -Salt $defSalt
-            Save-AuthStore @{
-                users     = @(@{ username = 'nexus'; passwordHash = $defHash; salt = $defSalt; role = 'admin'; createdAt = (Get-Date).ToString('o') })
-                sessions  = @()
-                apiTokens = @()
-            }
-            Write-Host "Auth store initialized with default user (nexus / nexus)" -ForegroundColor Green
-        } catch {
-            Write-Host "Failed to initialize auth store: $($_.Exception.Message)" -ForegroundColor Red
-        }
+    # Check if setup is needed (no auth.json = first run)
+    $needsSetup = -not (Test-Path './conf/auth.json')
+    if ($needsSetup) {
+        Write-Host "First run detected - setup wizard will be served" -ForegroundColor Yellow
     }
 
     # Auth middleware — every request except the whitelist must carry a valid token
@@ -389,18 +393,12 @@ Start-PodeServer -Threads 4 {
 
         # Unauthenticated paths — the HTML shell (/) is public; auth.js guards
         # it client-side and all /api/* calls require a Bearer token.
-        if ($path -eq '/' -or $path -eq '/login' -or $path -like '/static/*' -or $path -like '/api/auth/login*' -or $path -eq '/api/version') {
+        if ($path -eq '/' -or $path -eq '/login' -or $path -eq '/setup' -or $path -like '/static/*' -or $path -like '/api/auth/login*' -or $path -eq '/api/auth/check-setup' -or $path -like '/api/auth/setup' -or $path -eq '/api/auth/check-terminal' -or $path -eq '/api/version') {
             return $true
         }
 
-        # Allow internal container requests (localhost) without auth so that
-        # scripts, NLS module, and workflow engine can call the API freely.
-        # Only trust the TCP socket address — never a header, which clients can forge.
-        $socketIp = ''
-        try { $socketIp = "$($WebEvent.Request.RemoteEndPoint.Address)" } catch {}
-        if ($socketIp -eq '127.0.0.1' -or $socketIp -eq '::1') {
-            return $true
-        }
+        # Localhost bypass removed for security hardening.
+        # Internal services should use API tokens for authentication.
 
         $authHeader = Get-PodeHeader -Name 'Authorization'
         if ($authHeader -and $authHeader -match '^Bearer\s+(.+)$') {
@@ -478,6 +476,84 @@ Start-PodeServer -Threads 4 {
             Write-PodeJsonResponse -Value @{ success = $true; token = $token; username = $body.username; role = $user.role; expiresAt = $expiresAt }
         } catch {
             Write-PodeJsonResponse -Value @{ success = $false; message = "Login error: $($_.Exception.Message)" } -StatusCode 500
+        }
+    }
+
+    # Setup status check
+    # Terminal auth check - validates token from query param (used by nginx auth_request)
+    Add-PodeRoute -Method Get -Path '/api/auth/check-terminal' -ScriptBlock {
+        $token = $WebEvent.Query['token']
+        if (-not $token) {
+            Set-PodeResponseStatus -Code 401
+            return
+        }
+        $store = Get-AuthStore
+        if (-not $store) { Set-PodeResponseStatus -Code 401; return }
+        $valid = $false
+        foreach ($s in @($store.sessions)) {
+            if ($s -and $s.token -eq $token) {
+                try { if ([datetime]::Parse($s.expiresAt) -gt (Get-Date)) { $valid = $true; break } } catch {}
+            }
+        }
+        if (-not $valid) {
+            foreach ($t in @($store.apiTokens)) {
+                if ($t -and $t.token -eq $token) { $valid = $true; break }
+            }
+        }
+        if ($valid) {
+            Set-PodeResponseStatus -Code 200
+        } else {
+            Set-PodeResponseStatus -Code 401
+        }
+    }
+
+    Add-PodeRoute -Method Get -Path '/api/auth/check-setup' -ScriptBlock {
+        $needs = -not (Test-Path './conf/auth.json') -or @((Get-AuthStore).users).Count -eq 0
+        Write-PodeJsonResponse -Value @{ needsSetup = $needs }
+    }
+
+    # Initial setup - create first admin user
+    Add-PodeRoute -Method Post -Path '/api/auth/setup' -ScriptBlock {
+        # Only allow if no users exist
+        if ((Test-Path './conf/auth.json') -and @((Get-AuthStore).users).Count -gt 0) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Setup already completed' } -StatusCode 400
+            return
+        }
+        $body = $WebEvent.Data
+        if (-not $body.username -or -not $body.password) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Username and password required' } -StatusCode 400
+            return
+        }
+        if ($body.password.Length -lt 8) {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Password must be at least 8 characters' } -StatusCode 400
+            return
+        }
+        try {
+            $salt = New-Salt
+            $hash = Get-PasswordHash -Password $body.password -Salt $salt
+            $token = New-AuthToken
+            $now = (Get-Date).ToString('o')
+            $expiresAt = (Get-Date).AddHours(8).ToString('o')
+            Save-AuthStore @{
+                users = @(@{
+                    username = $body.username
+                    passwordHash = $hash
+                    salt = $salt
+                    role = 'admin'
+                    createdAt = $now
+                })
+                sessions = @(@{
+                    token = $token
+                    username = $body.username
+                    createdAt = $now
+                    expiresAt = $expiresAt
+                })
+                apiTokens = @()
+            }
+            Write-Host "Setup complete - admin user '$($body.username)' created" -ForegroundColor Green
+            Write-PodeJsonResponse -Value @{ success = $true; token = $token; username = $body.username; role = 'admin' }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = "Setup failed: $($_.Exception.Message)" } -StatusCode 500
         }
     }
 
@@ -1218,6 +1294,11 @@ Start-PodeServer -Threads 4 {
 
     # Resolve credential — returns decrypted values (for script/API consumption)
     Add-PodeRoute -Method Get -Path '/api/credentials/:name/resolve' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin access required' } -StatusCode 403
+            return
+        }
         $name = $WebEvent.Parameters['name']
         try {
             $result = & './Scripts/PODE/ResolveCredential.ps1' -Name $name
@@ -2007,6 +2088,111 @@ Start-PodeServer -Threads 4 {
             Write-EngineLog "LOG CLEANUP: Complete — removed $totalRemoved log blobs"
         } catch {
             Write-Host "Log cleanup timer error: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
+
+    # ===== CERTIFICATE MANAGEMENT =====
+
+    # Get current certificate info
+    Add-PodeRoute -Method Get -Path '/api/admin/cert-info' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin required' } -StatusCode 403
+            return
+        }
+        try {
+            $certPath = './conf/cert.pem'
+            if (Test-Path $certPath) {
+                $certText = & openssl x509 -in $certPath -noout -subject -issuer -dates -fingerprint 2>&1 | Out-String
+                $isSelfSigned = $certText -match 'Issuer.*GH2AZ' -or $certText -match 'Issuer.*nexus'
+                Write-PodeJsonResponse -Value @{ success = $true; info = $certText.Trim(); selfSigned = $isSelfSigned }
+            } else {
+                Write-PodeJsonResponse -Value @{ success = $true; info = 'No certificate found'; selfSigned = $true }
+            }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = $_.Exception.Message } -StatusCode 500
+        }
+    }
+
+    # Generate a CSR for obtaining a signed certificate
+    Add-PodeRoute -Method Post -Path '/api/admin/generate-csr' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin required' } -StatusCode 403
+            return
+        }
+        try {
+            $body = $WebEvent.Data
+            $cn = if ($body.commonName) { $body.commonName } else { 'nexus' }
+            $org = if ($body.organization) { $body.organization } else { 'Organization' }
+            $country = if ($body.country) { $body.country } else { 'US' }
+            $state = if ($body.state) { $body.state } else { '' }
+            $locality = if ($body.locality) { $body.locality } else { '' }
+            $san = if ($body.san) { $body.san } else { '' }
+
+            $subj = "/CN=$cn/O=$org/C=$country"
+            if ($state) { $subj += "/ST=$state" }
+            if ($locality) { $subj += "/L=$locality" }
+
+            $csrKeyPath = './conf/csr-key.pem'
+            $csrPath = './conf/csr.pem'
+
+            $sanConfig = ''
+            if ($san) {
+                $sanEntries = ($san -split ',') | ForEach-Object { $_.Trim() }
+                $sanLines = @()
+                $i = 1
+                foreach ($entry in $sanEntries) {
+                    if ($entry -match '^\d') {
+                        $sanLines += "IP.$i = $entry"
+                    } else {
+                        $sanLines += "DNS.$i = $entry"
+                    }
+                    $i++
+                }
+                $sanConfig = "[req]`nreq_extensions = v3_req`n[v3_req]`nsubjectAltName = @alt_names`n[alt_names]`n$($sanLines -join "`n")"
+                $sanConfFile = './conf/san.cnf'
+                $sanConfig | Set-Content -Path $sanConfFile -Encoding UTF8
+                & openssl req -new -newkey rsa:2048 -nodes -keyout $csrKeyPath -out $csrPath -subj $subj -config $sanConfFile -extensions v3_req 2>&1 | Out-Null
+            } else {
+                & openssl req -new -newkey rsa:2048 -nodes -keyout $csrKeyPath -out $csrPath -subj $subj 2>&1 | Out-Null
+            }
+
+            $csrContent = Get-Content -Path $csrPath -Raw
+            Write-PodeJsonResponse -Value @{ success = $true; csr = $csrContent; message = 'CSR generated. Submit this to your CA.' }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = "CSR generation failed: $($_.Exception.Message)" } -StatusCode 500
+        }
+    }
+
+    # Upload signed certificate
+    Add-PodeRoute -Method Post -Path '/api/admin/upload-cert' -ScriptBlock {
+        $auth = Get-AuthUser -WebEvt $WebEvent
+        if (-not $auth -or $auth.role -ne 'admin') {
+            Write-PodeJsonResponse -Value @{ success = $false; message = 'Admin required' } -StatusCode 403
+            return
+        }
+        try {
+            $body = $WebEvent.Data
+            if (-not $body.certificate) {
+                Write-PodeJsonResponse -Value @{ success = $false; message = 'Certificate PEM content required' } -StatusCode 400
+                return
+            }
+
+            # Write the signed cert
+            $body.certificate | Set-Content -Path './conf/cert.pem' -Encoding UTF8
+
+            # If CSR key exists, move it to be the active key
+            if (Test-Path './conf/csr-key.pem') {
+                Copy-Item -Path './conf/csr-key.pem' -Destination './conf/key.pem' -Force
+            }
+
+            # Reload nginx to pick up new cert
+            & nginx -s reload 2>&1 | Out-Null
+
+            Write-PodeJsonResponse -Value @{ success = $true; message = 'Certificate installed. Nginx reloaded.' }
+        } catch {
+            Write-PodeJsonResponse -Value @{ success = $false; message = "Upload failed: $($_.Exception.Message)" } -StatusCode 500
         }
     }
 }

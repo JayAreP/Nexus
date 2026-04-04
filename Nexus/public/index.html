@@ -522,13 +522,17 @@
                     <p>Restricted test environment &mdash; pwsh, python3, terraform, az, aws, gcloud, bash</p>
                 </div>
                 <div class="panel-body">
-                    <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
-                        <button class="btn btn-secondary btn-sm" id="sandbox-reset-btn">Reset Workspace</button>
-                        <button class="btn btn-secondary btn-sm" id="sandbox-popout-btn">Pop Out</button>
-                        <button class="btn btn-secondary btn-sm" id="nls-help-btn">NLS Help</button>
-                        <span style="font-size:11px; color:var(--text-secondary);">Working directory: /home/sandbox/workspace</span>
+                    <div style="text-align:center; padding:40px 20px;">
+                        <div style="font-size:48px; margin-bottom:16px; opacity:0.5;">&#9000;</div>
+                        <p style="color:var(--text-secondary); margin-bottom:20px;">The sandbox terminal opens in a secure pop-out window.</p>
+                        <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                            <button class="btn btn-primary" id="sandbox-popout-btn">Launch Terminal</button>
+                            <button class="btn btn-secondary btn-sm" id="sandbox-reset-btn">Reset Workspace</button>
+                            <button class="btn btn-secondary btn-sm" id="nls-help-btn">NLS Help</button>
+                        </div>
+                        <p style="color:var(--text-secondary); font-size:12px; margin-top:12px;">Working directory: /home/sandbox/workspace</p>
                     </div>
-                    <iframe id="sandbox-terminal" src=""></iframe>
+                    <div id="sandbox-message" class="message" style="margin-top:12px;"></div>
                 </div>
             </div>
 
@@ -567,6 +571,80 @@
                             <button type="button" id="prepare-containers-btn" class="btn btn-secondary">Prepare Containers</button>
                         </div>
                     </form>
+
+                    <!-- TLS Certificate Management -->
+                    <div style="margin-top:24px; border-top:1px solid var(--border); padding-top:20px;">
+                        <h3 style="margin-bottom:12px;">TLS Certificate</h3>
+                        <div id="cert-info" style="padding:12px; background:var(--bg-raised, #0f1525); border:1px solid var(--border, rgba(255,255,255,0.06)); border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-secondary, #9aadc7); white-space:pre-wrap; margin-bottom:16px;">Loading certificate info...</div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="openCsrModal()">Generate CSR</button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="openUploadCertModal()">Upload Signed Certificate</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CSR Generation Modal -->
+            <div id="csr-modal" class="modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+                <div class="modal-content" style="max-width:600px;">
+                    <div class="modal-header">
+                        <h2>Generate Certificate Signing Request</h2>
+                        <button class="modal-close" onclick="document.getElementById('csr-modal').style.display='none'">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Common Name (CN)</label>
+                            <input type="text" id="csr-cn" placeholder="nexus.example.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Organization</label>
+                            <input type="text" id="csr-org" placeholder="My Company">
+                        </div>
+                        <div class="form-group">
+                            <label>Country (2-letter code)</label>
+                            <input type="text" id="csr-country" placeholder="US" maxlength="2">
+                        </div>
+                        <div class="form-group">
+                            <label>State/Province</label>
+                            <input type="text" id="csr-state" placeholder="California">
+                        </div>
+                        <div class="form-group">
+                            <label>Locality/City</label>
+                            <input type="text" id="csr-locality" placeholder="San Francisco">
+                        </div>
+                        <div class="form-group">
+                            <label>Subject Alternative Names <span style="color:var(--text-secondary);font-weight:400;">(comma-separated DNS names or IPs)</span></label>
+                            <input type="text" id="csr-san" placeholder="nexus.example.com, 10.0.0.5">
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-primary" onclick="generateCsr()">Generate CSR</button>
+                        </div>
+                        <div id="csr-output" style="display:none; margin-top:16px;">
+                            <label>CSR (copy and submit to your CA)</label>
+                            <textarea id="csr-content" readonly style="width:100%; height:200px; font-family:'JetBrains Mono',monospace; font-size:11px; background:var(--bg-raised, #0f1525); color:var(--text-primary); border:1px solid var(--border); border-radius:6px; padding:10px;"></textarea>
+                            <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px;" onclick="navigator.clipboard.writeText(document.getElementById('csr-content').value)">Copy to Clipboard</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload Certificate Modal -->
+            <div id="upload-cert-modal" class="modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+                <div class="modal-content" style="max-width:600px;">
+                    <div class="modal-header">
+                        <h2>Upload Signed Certificate</h2>
+                        <button class="modal-close" onclick="document.getElementById('upload-cert-modal').style.display='none'">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p style="color:var(--text-secondary); margin-bottom:16px;">Paste the PEM-encoded certificate from your CA. This will replace the current certificate and reload nginx.</p>
+                        <div class="form-group">
+                            <label>Certificate PEM</label>
+                            <textarea id="upload-cert-content" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" style="width:100%; height:200px; font-family:'JetBrains Mono',monospace; font-size:11px; background:var(--bg-raised, #0f1525); color:var(--text-primary); border:1px solid var(--border); border-radius:6px; padding:10px;"></textarea>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-primary" onclick="uploadCert()">Install Certificate</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 

@@ -50,6 +50,11 @@ RUN curl -fsSL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_li
     && rm terraform.zip \
     && terraform --version
 
+# Install Bicep CLI
+RUN curl -fsSL https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64 -o /usr/local/bin/bicep \
+    && chmod +x /usr/local/bin/bicep \
+    && bicep --version
+
 # Install required PowerShell modules
 RUN pwsh -Command "Install-Module -Name Pode -Force -Scope AllUsers -AllowClobber"
 RUN pwsh -Command "Install-Module -Name Az.Storage -Force -Scope AllUsers -AllowClobber"
@@ -95,6 +100,8 @@ EXPOSE 8080
 
 ENV POWERSHELL_TELEMETRY_OPTOUT=1
 ENV PYTHONPATH="/mnt/nexus/py-packages"
+ENV PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/az/bin:${PATH}"
+ENV TMPDIR="/tmp"
 
 # Add /mnt/nexus paths to PowerShell and Python for all users (including sandbox)
 RUN echo '$env:PSModulePath += ":/mnt/nexus/ps-modules"' >> /opt/microsoft/powershell/7-lts/profile.ps1

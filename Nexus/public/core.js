@@ -21,7 +21,7 @@ document.querySelectorAll('.nav-link').forEach(link => {
         if (panelId === 'logs') loadWorkflowDropdowns();
         if (panelId === 'modules') { document.getElementById('modules-output').innerHTML = ''; document.getElementById('modules-empty').style.display = 'block'; }
         if (panelId === 'sandbox') loadSandboxTerminal();
-        if (panelId === 'config') loadConfig();
+        if (panelId === 'config') { loadConfig(); loadCertInfo(); }
         if (panelId === 'users') { loadUsers(); loadApiTokens(); }
     });
 });
@@ -142,17 +142,90 @@ document.getElementById('prepare-containers-btn').addEventListener('click', asyn
     }
 });
 
-// ===== SANDBOX =====
-// Load terminal iframe when sandbox panel is activated
-function loadSandboxTerminal() {
-    const iframe = document.getElementById('sandbox-terminal');
-    if (!iframe.src || iframe.src === '' || iframe.src === window.location.href) {
-        iframe.src = '/terminal/';
+// ===== TLS CERTIFICATE MANAGEMENT =====
+
+async function loadCertInfo() {
+    try {
+        const r = await fetch('/api/admin/cert-info');
+        const data = await r.json();
+        const el = document.getElementById('cert-info');
+        if (el) {
+            if (data.success) {
+                el.textContent = data.info + (data.selfSigned ? '\n\n⚠ Self-signed certificate' : '\n\n✓ CA-signed certificate');
+                el.style.borderColor = data.selfSigned ? 'rgba(245,158,11,0.3)' : 'rgba(16,185,129,0.3)';
+            } else {
+                el.textContent = data.message || 'Failed to load cert info';
+            }
+        }
+    } catch(e) { console.error('Cert info failed:', e); }
+}
+
+function openCsrModal() {
+    document.getElementById('csr-modal').style.display = 'flex';
+    document.getElementById('csr-output').style.display = 'none';
+}
+
+function openUploadCertModal() {
+    document.getElementById('upload-cert-modal').style.display = 'flex';
+    document.getElementById('upload-cert-content').value = '';
+}
+
+async function generateCsr() {
+    try {
+        const r = await fetch('/api/admin/generate-csr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                commonName: document.getElementById('csr-cn').value,
+                organization: document.getElementById('csr-org').value,
+                country: document.getElementById('csr-country').value,
+                state: document.getElementById('csr-state').value,
+                locality: document.getElementById('csr-locality').value,
+                san: document.getElementById('csr-san').value
+            })
+        });
+        const data = await r.json();
+        if (data.success) {
+            document.getElementById('csr-content').value = data.csr;
+            document.getElementById('csr-output').style.display = 'block';
+        } else {
+            alert(data.message || 'CSR generation failed');
+        }
+    } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function uploadCert() {
+    const cert = document.getElementById('upload-cert-content').value.trim();
+    if (!cert || !cert.includes('BEGIN CERTIFICATE')) {
+        alert('Please paste a valid PEM certificate');
+        return;
     }
+    try {
+        const r = await fetch('/api/admin/upload-cert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ certificate: cert })
+        });
+        const data = await r.json();
+        if (data.success) {
+            alert('Certificate installed successfully. The page will reload.');
+            document.getElementById('upload-cert-modal').style.display = 'none';
+            loadCertInfo();
+            window.location.reload();
+        } else {
+            alert(data.message || 'Upload failed');
+        }
+    } catch(e) { alert('Error: ' + e.message); }
+}
+
+// ===== SANDBOX =====
+function loadSandboxTerminal() {
+    // No-op — terminal is pop-out only now
 }
 
 document.getElementById('sandbox-popout-btn').addEventListener('click', () => {
-    window.open('/terminal/', '_blank', 'width=900,height=600');
+    const token = localStorage.getItem('nexus_auth_token');
+    window.open('/terminal/?token=' + encodeURIComponent(token), '_blank', 'width=1000,height=650');
 });
 
 document.getElementById('sandbox-reset-btn').addEventListener('click', async () => {
